@@ -32,34 +32,51 @@ tampak untung. `research/forward_test_m1_compare.py` (baris 32 & 137) dan
 `src/backtest/engine.py` (baris 50) sama-sama memanggil fungsi yang bocor itu, sehingga
 **angka PF 2.25 / PF 2.08 pada laporan forward test sebelumnya tidak dapat dipakai.**
 
-**2. Pada data yang bersih, plan saat ini DAN saran saya sama-sama rugi.**
+**2. Pada data yang bersih, TIDAK ADA konfigurasi yang menghasilkan PF > 1.**
+Lima geometri diuji pada data, jendela, dan engine yang sama persis:
 
-| Jan–Jun 2026, risk 1%, modal $10.000 | Trades | WR | PF | Net | DD | Entry/hari |
+| Jan–Jun 2026, risk 1%, modal $10.000, 154 hari bursa | Trades | **Entry/hari** | **WR** | **PF** | **PnL** | **DD** |
 |---|---|---|---|---|---|---|
-| **A — plan saat ini** (config.py) | 729 | 58,71% | **0,93** | **−$2.100** | 29,4% | 4,73 |
-| **B — rekomendasi** (TP dipadatkan + killzone + CB) | 177 | 63,84% | **0,67** | **−$2.234** | 25,0% | 1,15 |
-| **C — rekomendasi tanpa killzone** (ablasi) | 968 | 67,15% | **0,84** | **−$5.300** | 54,2% | 6,29 |
+| **A — plan saat ini** (config.py) | 729 | 4,73 | 58,71% | **0,93** | **−$2.100** | 29,4% |
+| **B — saran saya (versi lama)** | 177 | 1,15 | 63,84% | **0,67** | **−$2.234** | 25,0% |
+| **C — B tanpa killzone** (ablasi) | 968 | 6,29 | 67,15% | **0,84** | **−$5.300** | 54,2% |
+| **D — A dengan trailing DIMATIKAN** | 232 | 1,51 | 38,79% | **0,65** | **−$5.237** | 53,0% |
+| **E — single tier 1:1, close 100%** | 798 | 5,18 | 47,24% | **0,90** | **−$4.620** | 50,4% |
 
-**3. Sinyal tidak menambah edge di atas entry acak.** Dengan geometri SL/TP identik tetapi
-waktu dan arah entry diacak:
+A adalah yang "paling tidak buruk", tetapi tetap di bawah 1,0.
 
-| | PF sinyal | PF acak | Selisih |
-|---|---|---|---|
-| A | 0,934 | 0,897 | **+0,037** |
-| B | 0,668 | 0,820 | **−0,152** |
-| C | 0,841 | 0,935 | **−0,094** |
+**3. Sinyal tidak menambah edge di atas entry acak — dan konfigurasi E membuktikannya
+secara telanjang.** Dengan geometri SL/TP identik tetapi waktu dan arah entry diacak:
 
-Untuk B dan C sinyalnya justru **lebih buruk dari acak**. Untuk A selisihnya +0,037 PF —
-terlalu kecil untuk disebut edge, dan tetap di bawah 1,0.
+| | PF sinyal | PF acak | Selisih | WR sinyal | WR acak |
+|---|---|---|---|---|---|
+| A | 0,934 | 0,897 | **+0,037** | 58,71% | 56,83% |
+| B | 0,668 | 0,820 | **−0,152** | 63,84% | 69,16% |
+| C | 0,841 | 0,935 | **−0,094** | 67,15% | 68,22% |
+| D | 0,649 | 0,764 | **−0,115** | 38,79% | 44,78% |
+| **E** | **0,895** | **0,912** | **−0,017** | **47,24%** | **47,69%** |
 
-**4. Risk 5% memusnahkan akun.** Pada setting `config.py` sekarang (risk 5% = $500/trade),
-ketiga konfigurasi menghabiskan seluruh $10.000 sebelum akhir Juni:
+Konfigurasi E memakai target simetris 1:1, sehingga WR break-even persis 50%.
+Entry acak mengenai TP **47,69%**; strategi mengenai **47,24%**. Pada target simetris,
+sinyal `ssl_sweep + displacement` **tidak dapat dibedakan dari lempar koin**.
 
-| risk 5% | Trades | PF | Net | DD |
-|---|---|---|---|---|
-| A | 719 | 0,93 | −$10.068 | **100,5% — bangkrut** |
-| B | 139 | 0,62 | −$10.054 | **100,5% — bangkrut** |
-| C | 187 | 0,71 | −$10.059 | **100,6% — bangkrut** |
+**4. Trailing stop adalah komponen paling berharga di sistem ini.** Mematikannya (D)
+menaikkan tingkat ketercapaian TP secara dramatis — TP1 25,2% → 38,8%, TP2 5,1% → 19,0%,
+TP3 1,2% → 11,2% — tetapi PF justru **anjlok dari 0,93 ke 0,65** dan DD naik dari 29,4%
+ke 53,0%. Artinya "scratch trailing-lock ~$41" yang saya sebut win palsu di analisis
+sebelumnya bukan cacat: itu mekanisme mitigasi kerugian yang menahan sistem tetap dekat
+break-even. Hipotesis saya bahwa trailing memakan TP1 **terbukti salah arah**.
+
+**5. Risk 5% memusnahkan akun.** Pada setting `config.py` sekarang (risk 5% = $500/trade),
+**kelima** konfigurasi menghabiskan seluruh $10.000 sebelum akhir Juni:
+
+| risk 5% | Trades | Entry/hari | WR | PF | PnL | DD |
+|---|---|---|---|---|---|---|
+| A | 719 | 4,67 | 58,69% | 0,93 | −$10.068 | **100,5% — bangkrut** |
+| B | 139 | 0,90 | 61,87% | 0,62 | −$10.054 | **100,5% — bangkrut** |
+| C | 187 | 1,21 | 62,57% | 0,71 | −$10.059 | **100,6% — bangkrut** |
+| D | 53 | 0,34 | 32,08% | 0,43 | −$10.147 | **101,4% — bangkrut** |
+| E | 129 | 0,84 | 41,86% | 0,72 | −$10.395 | **103,6% — bangkrut** |
 
 ---
 
@@ -159,12 +176,19 @@ Ini bagian yang paling penting untuk dibaca sebelum menyentuh parameter apa pun.
 | **A** | 729 | 428 | 301 | 360 (**84%**) rata $45 | 68 (**9,3%** dari semua trade) rata $196 | $68,94 | −$105,00 | **60,4%** |
 | **B** | 177 | 113 | 64 | 112 (**99%**) rata $39 | 1 (**0,6%**) rata $154 | $39,70 | −$105,00 | **72,6%** |
 | **C** | 968 | 650 | 318 | 640 (**98%**) rata $41 | 10 (**1,0%**) rata $161 | $43,21 | −$105,00 | **70,8%** |
+| **D** (trailing off) | 232 | 90 | 142 | 64 (71%) rata $58 | 26 (**11,2%**) rata $230 | $107,48 | −$105,00 | **49,4%** |
+| **E** (single tier 1:1) | 798 | 377 | 421 | — | 377 (**47,2%**) rata $105 | $105,00 | −$105,00 | **50,0%** |
 
-WR 58–67% itu **palsu**. Hampir seluruhnya adalah trade yang naik $10 lalu ditarik trailing
-stop ke lock +$3 (≈ $41–45 pada lot 0,07), bukan trade yang menyentuh TP. Kerugian penuh
-tetap $105. Jadi rata-rata menang $43–69 lawan rata-rata kalah $105.
+WR 58–67% pada A/B/C itu **palsu**. Hampir seluruhnya adalah trade yang naik $10 lalu
+ditarik trailing stop ke lock +$3 (≈ $41–45 pada lot 0,07), bukan trade yang menyentuh TP.
+Kerugian penuh tetap $105. Jadi rata-rata menang $43–69 lawan rata-rata kalah $105.
 
 Trailing lock aktif pada **58,8%** trade — jauh lebih sering daripada TP1 (25,2%).
+
+**Catatan untuk E:** seluruh 377 win bernilai persis $105 (= TP $15 × 0,07 lot × 100), jadi
+label "scratch" pada output mentah adalah artefak ambang $150 di skrip, bukan makna
+sesungguhnya. Yang penting dari E: payoff tepat 1,00 dan WR 47,24% — **2,76 poin persentase
+di bawah break-even** — sementara entry acak pada geometri identik mendapat **47,69%**.
 
 ### Ketercapaian target (geometri A)
 
@@ -193,6 +217,7 @@ Saran saya pada giliran sebelumnya harus dikoreksi berdasarkan data ini.
 | 3 | **Padatkan geometri TP ke R:R 0,75–1,0** | **SALAH. Dicabut.** WR memang naik (58,7% → 67,2%) tetapi payoff turun lebih cepat (0,66 → 0,41), sehingga WR break-even naik dari 60,4% ke 70,8% dan PF justru **turun** dari 0,93 ke 0,84 |
 | 4 | Aktifkan kembali killzone sebagai A/B | **Teruji, hasilnya negatif.** Killzone memangkas trade 729 → 177 dan PF turun 0,93 → 0,67. Ablasi C membuktikan pemadatan TP-lah yang merusak, bukan killzone-nya saja — tapi keduanya tidak menyelamatkan |
 | 5 | Set `MAX_CONSECUTIVE_LOSSES = 3` | **Boleh, tapi bukan penyelamat.** Semantiknya "per hari" (`icas_strategy.py:36`), dan di engine saya sempat menyebabkan deadlock permanen karena tidak di-reset |
+| 8 | *(hipotesis baru giliran ini)* trailing memakan TP1, jadi matikan trailing | **SALAH. Dicabut.** Konfigurasi D membuktikannya terbalik: TP1/2/3 naik tajam (25,2→38,8 / 5,1→19,0 / 1,2→11,2%) tetapi PF anjlok 0,93 → 0,65 dan DD naik 29,4% → 53,0%. Trailing justru komponen paling berharga di sistem ini |
 | 6 | Perbaiki floor margin/stop-out di backtest | **TETAP BENAR** dan kini terbukti penting: tanpa floor, PF 2,18 pada `test_new_icas_tp_be.py` berasal dari kurva dengan ekuitas −$38.683 |
 | 7 | Kalibrasi ulang `SLIPPAGE_USD` dari fill nyata | **TETAP BENAR.** Sudah dikerjakan (F-17) |
 
@@ -229,7 +254,8 @@ memberi **−$1.306,66 · WR 42,9% · PF 0,781**.
 | Berkas | Perubahan |
 |---|---|
 | `src/indicators/sessions.py` | **F-18 — repaint diperbaiki.** Level sesi kini point-in-time: Asia tersedia mulai 07:00, London mulai 12:00, sebelumnya pakai hari sebelumnya. Ditandatangani sebagai drop-in replacement (kolom & signature sama) |
-| `research/backtest_m1_audit.py` | **Baru.** Engine M1 bid/ask anti-repaint (A1–A8), termasuk `session_levels_repaint()` sebagai replika bug untuk mengukur dampaknya, baseline entry acak, dan varian `tp_first` untuk uji sensitivitas |
+| `research/backtest_m1_audit.py` | **Baru.** Engine M1 bid/ask anti-repaint (A1–A8), termasuk `session_levels_repaint()` sebagai replika bug untuk mengukur dampaknya, baseline entry acak, dan varian `tp_first` untuk uji sensitivitas. Posisi yang seluruh lotnya sudah terealisasi (`r1=1.0`) ditutup segera sebagai `TP-FULL` — tanpa ini posisi "hantu" bervolume 0 menggantung sampai kena SL dan membuat entries/hari salah |
+| `research/backtest_m1_audit.py` | Konfigurasi **D** (`CFG_NOTRAIL`: plan saat ini dengan trailing dimatikan) dan **E** (`CFG_SINGLE`: single tier 1:1, close 100%) ditambahkan untuk menguji hipotesis "trailing memakan TP1" |
 | `research/test_antirepaint.py` | **Baru.** 24 uji anti-repaint dengan kontrol positif, termasuk truncation invariance dan regresi F-18 |
 | `research/run_m1_compare_audit.py` | **Baru.** Runner perbandingan A/B/C × (bersih, repaint, acak) × (risk 1%, 5%) + validasi silang jurnal live |
 | `reports/m1_audit_compare_jan_jun_2026.txt` | **Baru.** Hasil mentah lengkap, termasuk rincian per bulan |
@@ -252,26 +278,31 @@ memberi **−$1.306,66 · WR 42,9% · PF 0,781**.
 
 ## 8. Rekomendasi
 
-**Jangan naikkan ukuran posisi dan jangan retune TP.** Tidak ada konfigurasi yang diuji
-menghasilkan PF > 1 pada data bersih. Ini bukan masalah kalibrasi parameter; sinyal
-`ssl_sweep + bull_displacement` pada data ini tidak bisa dibedakan dari entry acak
-(selisih PF +0,037 untuk A, negatif untuk B dan C).
+**Jangan naikkan ukuran posisi dan jangan retune TP.** Tidak ada satu pun dari lima
+konfigurasi yang diuji menghasilkan PF > 1 pada data bersih. Ini bukan masalah kalibrasi
+parameter; pada target simetris 1:1 (konfigurasi E) sinyal mendapat WR 47,24% sedangkan
+entry acak 47,69% — tidak bisa dibedakan dari lempar koin.
 
 Urutan yang saya sarankan:
 
 1. **Turunkan `RISK_PER_TRADE` ke 1% sekarang juga**, atau lebih baik hentikan trading live.
-   Pada 5% akun $10.000 habis dalam < 6 bulan di ketiga konfigurasi.
+   Pada 5% akun $10.000 habis dalam < 6 bulan di **kelima** konfigurasi.
 2. **Jangan pakai angka forward test lama** (PF 2,25 / 2,08). Keduanya dihitung dengan level
    sesi yang bocor. Kalau ingin memvalidasi ulang, jalankan
    `research/forward_test_m1_compare.py` sekarang — `sessions.py` sudah diperbaiki, jadi
    angkanya akan berubah dan itulah angka yang jujur.
 3. **Setel ulang `MAX_SPREAD_POINTS` per feed.** Nilai 350 membuat bot mati total pada feed
-   dengan spread $0,69.
-4. **Kalau tetap ingin melanjutkan, ubah hipotesisnya, bukan parameternya.** Yang perlu diuji:
-   apakah *entry*-nya yang bermasalah (bukti: PF ≈ PF acak) atau *manajemen*-nya
-   (bukti: 84–99% "win" adalah trailing scratch $41). Uji paling murah: matikan trailing
-   sepenuhnya dan lihat apakah payoff naik cukup untuk menutup WR yang turun.
-5. **Kumpulkan fill price dari F-17** sebelum mempercayai backtest apa pun terhadap live.
+   dengan spread $0,69 (hanya 0,29% bar lolos → 3 trade dalam 6 bulan).
+4. **JANGAN matikan trailing stop.** Uji itu sudah saya jalankan (konfigurasi D) dan
+   hasilnya terbalik dari dugaan: TP1/2/3 naik tajam tetapi PF anjlok 0,93 → 0,65 dan DD
+   naik 29,4% → 53,0%. Trailing lock $3 setelah MFE $10 adalah satu-satunya hal yang
+   menahan sistem ini di dekat break-even. Kalau ingin memperbaiki, **perkuat** mekanisme
+   itu, bukan hapus.
+5. **Masalahnya ada di entry, bukan di manajemen.** Bukti terkuat: konfigurasi E. Tidak ada
+   manajemen posisi yang bisa menyelamatkan entry yang setara lempar koin. Penelitian
+   berikutnya harus mengubah definisi entry (konfirmasi multi-timeframe, filter
+   volatilitas/ATR, atau buang sinyal ini sama sekali).
+6. **Kumpulkan fill price dari F-17** sebelum mempercayai backtest apa pun terhadap live.
    Selisih expectancy live (−$62,22) vs backtest (−$14,00) sebesar 4,4× sebagian besar
    adalah slippage dan bug yang belum ada di data historis.
 

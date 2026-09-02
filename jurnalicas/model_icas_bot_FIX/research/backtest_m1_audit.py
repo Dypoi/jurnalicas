@@ -75,6 +75,23 @@ CFG_RECO = StratCfg(
     max_consec_losses=3,
 )
 
+# D & E dibentuk dari temuan backtest: 84-99% "WIN" ternyata scratch
+# trailing-lock, dan trailing lock ($3) aktif pada 58,8% trade sementara TP1
+# ($18,75) hanya 25,2%. Jadi trailing-lah yang memakan TP1, bukan TP1 yang
+# terlalu jauh. Diuji langsung dengan mematikan trailing.
+CFG_NOTRAIL = StratCfg(
+    name="D - PLAN SAAT INI, trailing DIMATIKAN",
+    trail_step_pips=99999.0, trail_lock_pips=0.0,
+)
+
+CFG_SINGLE = StratCfg(
+    name="E - single tier 1.0R, close 100%, tanpa trailing",
+    tp1_pips=150.0,          # 1.00R
+    tp2_pips=99999.0, tp3_pips=99999.0,
+    r1=1.0, r2=0.0, r3=0.0,
+    trail_step_pips=99999.0, trail_lock_pips=0.0,
+)
+
 CFG_RECO_NOKZ = replace(CFG_RECO, name="C - REKOMENDASI tanpa killzone (ablasi)",
                         use_killzone=False, max_trades_per_day=999,
                         max_consec_losses=999)
@@ -367,10 +384,17 @@ def run_backtest(m1: pd.DataFrame, m5: pd.DataFrame, cfg: StratCfg,
                         pos.realized += _tier_pnl(pos, pos.tp3, cfg.r3)
                         pos.t3 = True
                         pos.raise_sl(pos.tp1)
-                    kk = int(pos.mfe // step_d)
-                    if kk >= 1 and kk > pos.trail:
-                        pos.raise_sl(pos.entry + (kk - 1) * step_d + lock_d)
-                        pos.trail = kk
+                    if pos.remaining() <= 1e-9:
+                        lvl = pos.tp3 if pos.t3 else (pos.tp2 if pos.t2 else pos.tp1)
+                        trades.append(pos.book(lvl, "TP-FULL"))
+                        capital += trades[-1]["pnl"]; eq.append(capital)
+                        consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
+                        pos = None
+                    if pos is not None:
+                        kk = int(pos.mfe // step_d)
+                        if kk >= 1 and kk > pos.trail:
+                            pos.raise_sl(pos.entry + (kk - 1) * step_d + lock_d)
+                            pos.trail = kk
             else:
                 pos.mfe = max(pos.mfe, pos.entry - la[k])
                 hit_sl = ha[k] >= pos.sl
@@ -392,10 +416,17 @@ def run_backtest(m1: pd.DataFrame, m5: pd.DataFrame, cfg: StratCfg,
                         pos.realized += _tier_pnl(pos, pos.tp3, cfg.r3)
                         pos.t3 = True
                         pos.raise_sl(pos.tp1)
-                    kk = int(pos.mfe // step_d)
-                    if kk >= 1 and kk > pos.trail:
-                        pos.raise_sl(pos.entry - ((kk - 1) * step_d + lock_d))
-                        pos.trail = kk
+                    if pos.remaining() <= 1e-9:
+                        lvl = pos.tp3 if pos.t3 else (pos.tp2 if pos.t2 else pos.tp1)
+                        trades.append(pos.book(lvl, "TP-FULL"))
+                        capital += trades[-1]["pnl"]; eq.append(capital)
+                        consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
+                        pos = None
+                    if pos is not None:
+                        kk = int(pos.mfe // step_d)
+                        if kk >= 1 and kk > pos.trail:
+                            pos.raise_sl(pos.entry - ((kk - 1) * step_d + lock_d))
+                            pos.trail = kk
 
         if pos is None and k in entries:
             if per_day < cfg.max_trades_per_day and consec < cfg.max_consec_losses \

@@ -24,7 +24,8 @@ import pandas as pd
 sys.path.insert(0, ".")
 from research.backtest_m1_audit import (  # noqa: E402
     load_m1, session_levels_norepaint, session_levels_repaint, resample_m5,
-    run_backtest, StratCfg, CFG_CURRENT, CFG_RECO, CFG_RECO_NOKZ, PIP,
+    run_backtest, StratCfg, CFG_CURRENT, CFG_RECO, CFG_RECO_NOKZ,
+    CFG_NOTRAIL, CFG_SINGLE, PIP,
 )
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -67,7 +68,8 @@ say(f"Spread       : median ${m1.spread_usd.median():.2f} | p95 ${m1.spread_usd.
 say(f"Anti-repaint : 24/24 uji lulus  (research/test_antirepaint.py, termasuk truncation invariance)")
 say("")
 say("GEOMETRI YANG DIBANDINGKAN  (SL sama $%.2f = %d pips)" % (SL, CFG_CURRENT.sl_pips))
-for tag, c in (("A", CFG_CURRENT), ("B", CFG_RECO), ("C", CFG_RECO_NOKZ)):
+for tag, c in (("A", CFG_CURRENT), ("B", CFG_RECO), ("C", CFG_RECO_NOKZ),
+               ("D", CFG_NOTRAIL), ("E", CFG_SINGLE)):
     say(f"  {tag}  TP1 ${c.tp1_pips*PIP:>6.2f} ({c.tp1_pips/CFG_CURRENT.sl_pips:.2f}R)"
         f" | TP2 ${c.tp2_pips*PIP:>6.2f} ({c.tp2_pips/CFG_CURRENT.sl_pips:.2f}R)"
         f" | TP3 ${c.tp3_pips*PIP:>7.2f} ({c.tp3_pips/CFG_CURRENT.sl_pips:.2f}R)"
@@ -93,7 +95,8 @@ say(f"  Semua run di bawah memakai guard ${CFG_CURRENT.max_spread_usd:.2f}"
 
 # --------------------------------------------------------------------------- #
 print("menjalankan konfigurasi ...")
-JOBS = [("A", CFG_CURRENT), ("B", CFG_RECO), ("C", CFG_RECO_NOKZ)]
+JOBS = [("A", CFG_CURRENT), ("B", CFG_RECO), ("C", CFG_RECO_NOKZ),
+        ("D", CFG_NOTRAIL), ("E", CFG_SINGLE)]
 runs: dict[str, dict] = {}
 for risk, tag in ((RISK_LO, "1%"), (RISK_HI, "5%")):
     for key, cfg in JOBS:
