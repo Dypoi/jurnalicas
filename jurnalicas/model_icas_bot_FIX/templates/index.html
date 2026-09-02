@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Icas Autonomous Scalper | Live Institutional Dashboard</title>
+    <style>
+        :root {
+            --bg-body: #07090e;
+            --bg-card: #0e131b;
+            --bg-panel: #151d28;
+            --border: #202b3b;
+            --text-main: #f3f7fb;
+            --text-sub: #7e8e9f;
+            --gold: #f5b324;
+            --green: #10d88b;
+            --red: #f75268;
+            --blue: #388bfd;
+            --purple: #a371f7;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+        body { background: var(--bg-body); color: var(--text-main); padding: 16px; font-size: 13px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        
+        /* Top Navigation Header */
+        .navbar { display: flex; justify-content: space-between; align-items: center; background: var(--bg-card); border: 1px solid var(--border); padding: 12px 20px; border-radius: 10px; margin-bottom: 12px; }
+        .brand { display: flex; align-items: center; gap: 12px; }
+        .brand h1 { font-size: 19px; color: var(--gold); letter-spacing: 0.5px; font-weight: 700; }
+        .badge { font-size: 11px; padding: 4px 9px; border-radius: 6px; font-weight: 600; }
+        .badge-live { background: rgba(16, 216, 139, 0.15); color: var(--green); border: 1px solid var(--green); }
+        .badge-gold { background: rgba(245, 179, 36, 0.15); color: var(--gold); border: 1px solid var(--gold); }
+        .badge-blue { background: rgba(56, 139, 253, 0.15); color: var(--blue); border: 1px solid var(--blue); }
+        .badge-red { background: rgba(247, 82, 104, 0.15); color: var(--red); border: 1px solid var(--red); }
+        .badge-purple { background: rgba(163, 113, 247, 0.15); color: var(--purple); border: 1px solid var(--purple); }
+
+        /* MT5 Account Connection Telemetry Bar */
+        .account-bar { background: var(--bg-card); border: 1px solid var(--border); border-left: 4px solid var(--green); border-radius: 8px; padding: 12px 18px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+        .acc-user-info { display: flex; align-items: center; gap: 12px; }
+        .acc-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--bg-panel); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-weight: bold; color: var(--gold); font-size: 14px; }
+        .acc-details { display: flex; flex-direction: column; }
+        .acc-name { font-size: 13px; font-weight: 700; color: var(--text-main); }
+        .acc-meta { font-size: 11px; color: var(--text-sub); }
+
+        /* Metric Financial Grid */
+        .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 12px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; position: relative; }
+        .card-label { font-size: 11px; color: var(--text-sub); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; font-weight: 600; }
+        .card-value { font-size: 19px; font-weight: 700; }
+        .card-sub { font-size: 11px; color: var(--text-sub); margin-top: 4px; }
+        .val-gold { color: var(--gold); }
+        .val-green { color: var(--green); }
+        .val-blue { color: var(--blue); }
+        .val-red { color: var(--red); }
+        .val-purple { color: var(--purple); }
+        
+        /* Active Position Highlight Card */
+        .pos-banner { background: linear-gradient(135deg, rgba(245, 179, 36, 0.1) 0%, rgba(16, 216, 139, 0.1) 100%); border: 1.5px solid var(--gold); border-radius: 8px; padding: 14px 18px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+        .pos-title { font-size: 14px; font-weight: 700; color: var(--gold); display: flex; align-items: center; gap: 8px; }
+        .pos-stat { display: flex; flex-direction: column; }
+        .pos-stat-label { font-size: 10px; color: var(--text-sub); text-transform: uppercase; }
+        .pos-stat-val { font-size: 15px; font-weight: 700; }
+        
+        /* Main Layout Grid */
+        .main-layout { display: grid; grid-template-columns: 2.5fr 1fr; gap: 12px; margin-bottom: 12px; }
+        @media (max-width: 960px) { .main-layout { grid-template-columns: 1fr; } }
+        
+        .chart-box { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+        .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .chart-title { font-size: 14px; font-weight: 700; color: var(--gold); }
+        canvas { width: 100%; height: 380px; background: var(--bg-panel); border-radius: 6px; cursor: crosshair; }
+        
+        /* Side Panels */
+        .side-panel { display: flex; flex-direction: column; gap: 12px; }
+        .panel-box { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+        .panel-title { font-size: 13px; font-weight: 700; margin-bottom: 10px; border-bottom: 1px solid var(--border); padding-bottom: 6px; color: var(--blue); }
+        .info-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid rgba(32, 43, 59, 0.6); font-size: 12px; }
+        .info-row:last-child { border-bottom: none; }
+        .info-label { color: var(--text-sub); }
+        .info-val { font-weight: 600; }
+        
+        /* Table Box */
+        .table-box { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+        th { background: var(--bg-panel); color: var(--text-sub); font-weight: 600; text-transform: uppercase; font-size: 10px; }
+        tr:hover { background: rgba(56, 139, 253, 0.04); }
+        .tag-win { color: var(--green); font-weight: bold; }
+        .tag-be { color: var(--gold); font-weight: bold; }
+        .tag-loss { color: var(--red); font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Top Navbar -->
+        <div class="navbar">
+            <div class="brand">
+                <h1>⚡ MODEL ICAS AUTONOMOUS BOT</h1>
+                <span class="badge badge-gold">XAUUSD M5</span>
+                <span class="badge badge-blue" id="engine-ver">ENGINE: ...</span>
+                <span class="badge badge-red" id="engine-state-badge">STATUS: ...</span>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center; font-size: 12px;">
+                <div>WIB: <strong id="wib-time" style="color: var(--text-main);">--:--:--</strong></div>
+                <div>Server: <strong id="server-time" style="color: var(--text-sub);">--:--:--</strong></div>
+                <span id="session-badge" class="badge badge-blue">Session Active</span>
+                <span id="kz-badge" class="badge badge-gold">24H Full Market</span>
+            </div>
+        </div>
+
+        <!-- MT5 Broker Connection & Account Telemetry Bar -->
+        <div class="account-bar">
+            <div class="acc-user-info">
+                <div class="acc-avatar" id="acc-avatar">MT</div>
+                <div class="acc-details">
+                    <div class="acc-name">
+                        <span id="acc-name-val">Exness Trader Account</span>
+                        <span id="acc-mode-badge" class="badge badge-live" style="margin-left: 6px;">DEMO</span>
+                    </div>
+                    <div class="acc-meta">
+                        Login: <strong id="acc-login-val" style="color: var(--text-main);">88921045</strong> | 
+                        Server: <strong id="acc-server-val">Exness-MT5Trial6</strong> | 
+                        Leverage: <strong id="acc-leverage-val">1:2000</strong>
+                    </div>
+                </div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <span class="badge badge-live" id="broker-status-badge">● MT5 CONNECTED (OK)</span>
+                <span class="badge badge-gold" id="symbol-badge">SYMBOL: XAUUSDm</span>
+            </div>
+        </div>
+
+        <!-- Financial & 3-Way Performance Metrics Grid -->
+        <div class="metrics-grid">
+            <div class="card">
+                <div class="card-label">Account Balance</div>
+                <div class="card-value val-green" id="acc-balance">$10,000.00</div>
+                <div class="card-sub">Modal Utama Akun</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Account Equity</div>
+                <div class="card-value val-blue" id="acc-equity">$10,000.00</div>
+                <div class="card-sub" id="equity-sub">Floating: +$0.00</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Free Margin</div>
+                <div class="card-value val-green" id="acc-free-margin">$10,000.00</div>
+                <div class="card-sub" id="margin-level-sub">Margin Level: 100%</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Murni Win Rate (TP Hit)</div>
+                <div class="card-value val-green" id="win-rate-stat">63.58%</div>
+                <div class="card-sub">Target TP1/TP2/TP3 Tercapai</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Breakeven Rate (BE+)</div>
+                <div class="card-value val-gold" id="be-rate-stat">16.85%</div>
+                <div class="card-sub">Hasil Positif (0 Loss Modal)</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Non-Loss Rate (Safe)</div>
+                <div class="card-value val-purple" id="non-loss-stat">80.43% <span style="font-size: 11px; color: var(--text-sub);">(PF: 3.65)</span></div>
+                <div class="card-sub">Win + BE+ (Tingkat Keamanan)</div>
+            </div>
+        </div>
+
+        <!-- Active Position Live Banner (if any) -->
+        <div id="position-banner" class="pos-banner" style="display: none;">
+            <div class="pos-title">
+                <span>🔥 POSISI AKTIF TERBUKA:</span>
+                <span id="pos-type-badge" class="badge badge-live">BUY 2.50 Lots</span>
+                <span style="font-size: 11px; color: var(--text-sub);">Ticket: <strong id="pos-ticket">#0000</strong></span>
+            </div>
+            <div class="pos-stat">
+                <span class="pos-stat-label">Entry Price</span>
+                <span class="pos-stat-val" id="pos-entry">0.00</span>
+            </div>
+            <div class="pos-stat">
+                <span class="pos-stat-label">Current SL (Protected)</span>
+                <span class="pos-stat-val" id="pos-sl">0.00</span>
+            </div>
+            <div class="pos-stat">
+                <span class="pos-stat-label">Running Profit</span>
+                <span class="pos-stat-val val-green" id="pos-running-pnl">+0.0 pips (+$0.00)</span>
+            </div>
+            <div style="display: flex; gap: 6px;" id="pos-milestones">
+                <span id="badge-be" class="badge badge-gold">BE+ PENDING</span>
+                <span id="badge-tp1" class="badge badge-blue">TP1 (1:1) PENDING</span>
+                <span id="badge-tp2" class="badge badge-blue">TP2 (1:2) PENDING</span>
+                <span id="badge-tp3" class="badge badge-purple">TP3 (1:3) PENDING</span>
+            </div>
+        </div>
+
+        <!-- Main Layout: Chart + Side Panel -->
+        <div class="main-layout">
+            <div class="chart-box">
+                <div class="chart-header">
+                    <div class="chart-title">📊 XAUUSD M5 Price Action & 4-Tier Target Tracker</div>
+                    <div style="font-size: 11px; color: var(--text-sub);" id="chart-info">
+                        🟡 Garis Kuning = Live Bid Price | 🟢 FVG Bull | 🔴 FVG Bear
+                    </div>
+                </div>
+                <canvas id="candleChart"></canvas>
+            </div>
+
+            <div class="side-panel">
+                <!-- Protocol Rules (D-02: semua nilai DINAMIS dari engine aktif — tak ada hardcode legacy) -->
+                <div class="panel-box">
+                    <div class="panel-title">🛡️ 4-Tier Target Protocols <span id="cfg-engine" style="font-size: 10px; color: var(--text-sub);"></span></div>
+                    <div class="info-row"><span class="info-label">Initial Stop Loss</span><span class="info-val" id="cfg-sl">…</span></div>
+                    <div class="info-row"><span class="info-label">Early BE+ Trigger</span><span class="info-val" id="cfg-be">…</span></div>
+                    <div class="info-row"><span class="info-label" id="cfg-tp1-label">TP1</span><span class="info-val val-blue" id="cfg-tp1">…</span></div>
+                    <div class="info-row"><span class="info-label" id="cfg-tp2-label">TP2</span><span class="info-val val-blue" id="cfg-tp2">…</span></div>
+                    <div class="info-row"><span class="info-label" id="cfg-tp3-label">TP3</span><span class="info-val val-purple" id="cfg-tp3">…</span></div>
+                    <div class="info-row"><span class="info-label">Runner Trailing (20%)</span><span class="info-val val-gold" id="cfg-trail">…</span></div>
+                    <div class="info-row"><span class="info-label">Re-Entry after BE</span><span class="info-val val-green">ENABLED (Boleh Langsung Entry)</span></div>
+                </div>
+
+                <!-- [D-05] Jurnal & Observasi On/Off -->
+                <div class="panel-box">
+                    <div class="panel-title">📒 Jurnal Engine & Observasi On/Off</div>
+                    <div class="info-row"><span class="info-label">Status Engine</span><span class="info-val" id="jn-state">…</span></div>
+                    <div class="info-row"><span class="info-label">Event Terakhir</span><span class="info-val" id="jn-last">…</span></div>
+                    <div class="info-row"><span class="info-label">Sinyal / Order Hari Ini</span><span class="info-val val-blue" id="jn-today">…</span></div>
+                    <div class="info-row"><span class="info-label">PnL Hari Ini (realized)</span><span class="info-val" id="jn-pnl-today">…</span></div>
+                    <div class="info-row"><span class="info-label">PnL 7 Hari (realized)</span><span class="info-val" id="jn-pnl-week">…</span></div>
+                    <div class="info-row"><span class="info-label">Siklus On/Off</span><span class="info-val val-gold" id="jn-cycles">…</span></div>
+                    <div id="journal-feed" style="margin-top: 8px; font-size: 10.5px; color: var(--text-sub); max-height: 150px; overflow-y: auto;"></div>
+                </div>
+
+                <!-- Session Schedule -->
+                <div class="panel-box">
+                    <div class="panel-title">⏰ Global Session Schedule (WIB)</div>
+                    <div class="info-row"><span class="info-label">Tokyo / Asian</span><span class="info-val">07:00 - 11:00 WIB</span></div>
+                    <div class="info-row"><span class="info-label">London Open Burst</span><span class="info-val val-gold">14:00 - 16:00 WIB</span></div>
+                    <div class="info-row"><span class="info-label">New York Open Burst</span><span class="info-val val-gold">19:30 - 21:30 WIB</span></div>
+                    <div class="info-row"><span class="info-label">Session Mode</span><span class="info-val val-green" id="mode-display">24 Jam Full Market</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Trade Log Table -->
+        <div class="table-box">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="color: var(--gold); font-size: 14px; font-weight: 700;">📑 Riwayat Transaksi Terkini (Pemisahan Jelas: WIN / BE+ / LOSS)</h3>
+                <span style="font-size: 11px; color: var(--text-sub);" id="stats-source">Sumber: …</span>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Waktu (Server)</th>
+                        <th>Posisi</th>
+                        <th>Status Hasil</th>
+                        <th>PnL ($)</th>
+                        <th>Max Favorable</th>
+                        <th id="th-be">BE+</th>
+                        <th id="th-tp1">TP1</th>
+                        <th id="th-tp2">TP2</th>
+                        <th id="th-tp3">TP3</th>
+                        <th>Runner Step</th>
+                        <th>Saldo Akhir</th>
+                    </tr>
+                </thead>
+                <tbody id="trade-log-body">
+                    <tr><td colspan="11" style="text-align: center; color: var(--text-sub);">Memuat riwayat transaksi...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // [AUDIT FIX R-02] Propagasi token auth dari URL ke seluruh request API
+        const AUTH_TOKEN = new URLSearchParams(window.location.search).get('token') || '';
+        function apiUrl(path) {
+            return AUTH_TOKEN ? path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(AUTH_TOKEN) : path;
+        }
+        // [D-02] Parameter engine aktif (diisi fetchStatus) — semua label di UI
+        // dirender dari sini, BUKAN hardcode. Default = engine v2 SWING-150.
+        let CFG = { sl: 150, be: 9999, be_active: false, tp1: 187.5, tp2: 375, tp3: 562.5,
+                    r1: 1.25, r2: 2.5, r3: 3.75, trail: 100, lock: 30 };
+        const usd = p => '$' + (p * 0.10).toFixed(2);
+        function renderProtocol() {
+            document.getElementById('cfg-sl').innerText = CFG.sl.toFixed(1) + ' pips (' + usd(CFG.sl) + ')';
+            const beEl = document.getElementById('cfg-be');
+            if (CFG.be_active) {
+                beEl.innerText = '+' + CFG.be.toFixed(1) + ' pips (' + usd(CFG.be) + ') → Lock BE+';
+                beEl.className = 'info-val val-green';
+            } else {
+                beEl.innerText = 'DIMATIKAN (engine v2 — exit via TP tier + trailing)';
+                beEl.className = 'info-val val-red';
+            }
+            document.getElementById('cfg-tp1-label').innerText = 'TP1 (' + CFG.r1 + 'xSL / 30% Lot)';
+            document.getElementById('cfg-tp1').innerText = '+' + CFG.tp1.toFixed(1) + ' pips (' + usd(CFG.tp1) + ')';
+            document.getElementById('cfg-tp2-label').innerText = 'TP2 (' + CFG.r2 + 'xSL / 25% Lot)';
+            document.getElementById('cfg-tp2').innerText = '+' + CFG.tp2.toFixed(1) + ' pips (' + usd(CFG.tp2) + ')';
+            document.getElementById('cfg-tp3-label').innerText = 'TP3 (' + CFG.r3 + 'xSL / 25% Lot)';
+            document.getElementById('cfg-tp3').innerText = '+' + CFG.tp3.toFixed(1) + ' pips (' + usd(CFG.tp3) + ') → SL ke TP1';
+            document.getElementById('cfg-trail').innerText = 'Step ' + CFG.trail.toFixed(0) + 'p / Lock ' + CFG.lock.toFixed(0) + 'p';
+            document.getElementById('th-be').innerText = CFG.be_active ? ('BE+ @' + CFG.be.toFixed(0) + 'p') : 'BE+ (OFF)';
+            document.getElementById('th-tp1').innerText = 'TP1 (' + CFG.r1 + 'x)';
+            document.getElementById('th-tp2').innerText = 'TP2 (' + CFG.r2 + 'x)';
+            document.getElementById('th-tp3').innerText = 'TP3 (' + CFG.r3 + 'x)';
+        }
+        function money(x) { return (x >= 0 ? '+$' : '-$') + Math.abs(x).toFixed(2); }
+        async function fetchStatus() {
+            try {
+                const res = await fetch(apiUrl('/api/status'));
+                const d = await res.json();
+                
+                document.getElementById('wib-time').innerText = d.wib_time;
+                document.getElementById('server-time').innerText = d.server_time;
+                
+                if (d.account) {
+                    const a = d.account;
+                    document.getElementById('acc-name-val').innerText = a.name;
+                    document.getElementById('acc-login-val').innerText = a.login;
+                    document.getElementById('acc-server-val').innerText = a.server;
+                    document.getElementById('acc-leverage-val').innerText = a.leverage;
+                    
+                    const modeBadge = document.getElementById('acc-mode-badge');
+                    modeBadge.innerText = a.trade_mode;
+                    modeBadge.className = 'badge ' + (a.trade_mode === 'REAL' ? 'badge-live' : 'badge-gold');
+
+                    document.getElementById('acc-avatar').innerText = a.name ? a.name.substring(0, 2).toUpperCase() : 'MT';
+
+                    document.getElementById('acc-balance').innerText = '$' + a.balance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                    document.getElementById('acc-equity').innerText = '$' + a.equity.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                    
+                    const fPnl = a.floating_pnl || 0.0;
+                    document.getElementById('equity-sub').innerText = 'Floating: ' + (fPnl >= 0 ? '+' : '') + '$' + fPnl.toFixed(2);
+                    document.getElementById('equity-sub').className = 'card-sub ' + (fPnl >= 0 ? 'val-green' : 'val-red');
+
+                    document.getElementById('acc-free-margin').innerText = '$' + a.margin_free.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                    document.getElementById('margin-level-sub').innerText = 'Margin Level: ' + (a.margin_level ? a.margin_level.toFixed(0) : '100') + '%';
+                }
+
+                document.getElementById('session-badge').innerText = d.active_sessions;
+                document.getElementById('symbol-badge').innerText = 'SYMBOL: ' + d.symbol;
+
+                // [D-02/D-05] Identitas engine + protokol dinamis + panel jurnal
+                if (d.engine_version) {
+                    document.getElementById('engine-ver').innerText = d.engine_version.split(' (')[0].toUpperCase();
+                    document.getElementById('cfg-engine').innerText = '(' + d.engine_version.split(' (')[0] + ')';
+                }
+                CFG = { sl: d.sl_pips, be: d.early_be_pips, be_active: d.be_active,
+                        tp1: d.tp1_pips, tp2: d.tp2_pips, tp3: d.tp3_pips,
+                        r1: d.tp1_ratio, r2: d.tp2_ratio, r3: d.tp3_ratio,
+                        trail: d.trailing_step, lock: d.trailing_lock };
+                renderProtocol();
+                if (d.journal) {
+                    const j = d.journal;
+                    const stEl = document.getElementById('engine-state-badge');
+                    stEl.innerText = 'ENGINE ' + (j.engine_state || 'TIDAK DIKETAHUI');
+                    stEl.className = 'badge ' + ((j.engine_state || '').includes('AKTIF 🟢') ? 'badge-live' :
+                        ((j.engine_state || '').includes('MATI') ? 'badge-red' : 'badge-gold'));
+                    document.getElementById('jn-state').innerText = j.engine_state || '-';
+                    document.getElementById('jn-last').innerText = (j.last_event || '-').replace('T', ' ').slice(0, 19);
+                    document.getElementById('jn-today').innerText = (j.signals_today ?? 0) + ' sinyal / ' + (j.orders_today ?? 0) + ' order';
+                    const pT = j.pnl_today ?? 0, pW = j['pnl_7d'] ?? 0;
+                    const pTEl = document.getElementById('jn-pnl-today');
+                    pTEl.innerText = money(pT); pTEl.className = 'info-val ' + (pT >= 0 ? 'val-green' : 'val-red');
+                    const pWEl = document.getElementById('jn-pnl-week');
+                    pWEl.innerText = money(pW) + ' (' + (j.closed_trades_logged ?? 0) + ' trade tercatat)';
+                    pWEl.className = 'info-val ' + (pW >= 0 ? 'val-green' : 'val-red');
+                    document.getElementById('jn-cycles').innerText = (j.starts ?? 0) + '× ON / ' + (j.stops ?? 0) + '× OFF';
+                }
+                
+                const kzBadge = document.getElementById('kz-badge');
+                if (d.use_killzone) {
+                    kzBadge.innerText = d.in_killzone ? 'KILLZONE ACTIVE 🔥' : 'OUTSIDE KILLZONE';
+                    kzBadge.className = 'badge ' + (d.in_killzone ? 'badge-live' : 'badge-gold');
+                    document.getElementById('mode-display').innerText = 'ICT Killzone Only';
+                } else {
+                    kzBadge.innerText = '24 JAM FULL MARKET ✅';
+                    kzBadge.className = 'badge badge-live';
+                    document.getElementById('mode-display').innerText = '24 Jam Full Market';
+                }
+
+                const posBanner = document.getElementById('position-banner');
+                if (d.active_position) {
+                    posBanner.style.display = 'flex';
+                    const p = d.active_position;
+                    const typeBadge = document.getElementById('pos-type-badge');
+                    typeBadge.innerText = p.type + ' ' + p.volume.toFixed(2) + ' Lots';
+                    typeBadge.className = 'badge ' + (p.type === 'BUY' ? 'badge-live' : 'badge-red');
+                    document.getElementById('pos-ticket').innerText = '#' + p.ticket;
+                    document.getElementById('pos-entry').innerText = p.entry.toFixed(2);
+                    document.getElementById('pos-sl').innerText = p.sl.toFixed(2);
+                    
+                    const pnlEl = document.getElementById('pos-running-pnl');
+                    pnlEl.innerText = (p.fav_pips >= 0 ? '+' : '') + p.fav_pips.toFixed(1) + ' pips ($' + (p.pnl_usd >= 0 ? '+' : '') + p.pnl_usd.toFixed(2) + ')';
+                    pnlEl.className = 'pos-stat-val ' + (p.pnl_usd >= 0 ? 'val-green' : 'val-red');
+
+                    // [D-02] Label milestone dinamis mengikuti CFG engine aktif
+                    document.getElementById('badge-be').className = 'badge ' + (p.be_set ? 'badge-live' : 'badge-gold');
+                    document.getElementById('badge-be').innerText = p.be_set ? 'SL DI ATAS ENTRY 🛡️' :
+                        (CFG.be_active ? ('BE+ PENDING (@' + CFG.be.toFixed(0) + 'p)') : 'BE+ OFF (kalibrasi)');
+
+                    document.getElementById('badge-tp1').className = 'badge ' + (p.tp1_hit ? 'badge-live' : 'badge-blue');
+                    document.getElementById('badge-tp1').innerText = p.tp1_hit ? ('TP1 HIT 🎯 (' + CFG.r1 + 'xSL)') : 'TP1 PENDING';
+
+                    document.getElementById('badge-tp2').className = 'badge ' + (p.tp2_hit ? 'badge-live' : 'badge-blue');
+                    document.getElementById('badge-tp2').innerText = p.tp2_hit ? ('TP2 HIT 🎯 (' + CFG.r2 + 'xSL)') : 'TP2 PENDING';
+
+                    document.getElementById('badge-tp3').className = 'badge ' + (p.tp3_hit ? 'badge-purple' : 'badge-gold');
+                    document.getElementById('badge-tp3').innerText = p.tp3_hit ? ('TP3 HIT 🚀 (' + CFG.r3 + 'xSL, SL->TP1)') : 'TP3 PENDING';
+                } else {
+                    posBanner.style.display = 'none';
+                }
+            } catch (e) {
+                console.error("fetchStatus err:", e);
+            }
+        }
+
+        async function fetchStatsAndTrades() {
+            try {
+                const res = await fetch(apiUrl('/api/stats'));
+                const data = await res.json();
+                if (data.stats && data.stats.win_rate) {
+                    const st = data.stats;
+                    document.getElementById('win-rate-stat').innerText = st.win_rate + '% (' + st.wins + ' W)';
+                    const beRate = ((st.be_activations / st.total_trades) * 100).toFixed(2);
+                    document.getElementById('be-rate-stat').innerText = beRate + '% (' + st.be_activations + ' BE)';
+                    const nonLoss = (((st.wins + st.be_activations) / st.total_trades) * 100).toFixed(2);
+                    document.getElementById('non-loss-stat').innerHTML = nonLoss + '% <span style="font-size: 11px; color: var(--text-sub);">(PF: ' + st.profit_factor + ')</span>';
+                }
+                // [D-03] Label SUMBER statistik secara eksplisit + peringatan dataset repo
+                if (data.stats && data.stats.source) {
+                    const el = document.getElementById('stats-source');
+                    el.innerText = 'Sumber: ' + data.stats.source;
+                    el.style.color = data.stats.dataset_warning ? 'var(--red)' : 'var(--text-sub)';
+                    el.style.fontWeight = data.stats.dataset_warning ? '700' : '400';
+                }
+
+                if (data.recent_trades && data.recent_trades.length > 0) {
+                    const tbody = document.getElementById('trade-log-body');
+                    tbody.innerHTML = '';
+                    data.recent_trades.forEach(t => {
+                        const tr = document.createElement('tr');
+                        let tagClass = 'tag-win';
+                        let resText = 'WIN (TP Hit)';
+                        if (t.res === 'BE') {
+                            tagClass = 'tag-be';
+                            resText = 'BE+ (Scratch)';
+                        } else if (t.res === 'LOSS') {
+                            tagClass = 'tag-loss';
+                            resText = 'LOSS (SL Hit)';
+                        }
+
+                        // [D-02] Label sel milestone dinamis (bukan 1:1/+20p dsb. legacy)
+                        tr.innerHTML = `
+                            <td><strong>${t.time}</strong></td>
+                            <td><span class="badge ${t.type === 'BUY' ? 'badge-live' : 'badge-red'}">${t.type}</span></td>
+                            <td><span class="${tagClass}">${resText}</span></td>
+                            <td class="${t.pnl >= 0 ? 'val-green' : 'val-red'}"><strong>$${t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(2)}</strong></td>
+                            <td>+${t.max_fav.toFixed(1)} pips</td>
+                            <td>${t.be_set ? '🛡️ Lock' : '-'}</td>
+                            <td>${t.tp1 ? ('🎯 ' + CFG.r1 + 'x (+' + CFG.tp1.toFixed(0) + 'p)') : '-'}</td>
+                            <td>${t.tp2 ? ('🎯 ' + CFG.r2 + 'x (+' + CFG.tp2.toFixed(0) + 'p)') : '-'}</td>
+                            <td>${t.tp3 ? ('🚀 ' + CFG.r3 + 'x (+' + CFG.tp3.toFixed(0) + 'p)') : '-'}</td>
+                            <td>${t.trail_step > 0 ? '🚀 Step ' + t.trail_step : '-'}</td>
+                            <td>${t.balance > 0 ? '$' + t.balance.toLocaleString('en-US', {minimumFractionDigits: 2}) : '—'}</td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                }
+            } catch (e) {
+                console.error("fetchStats err:", e);
+            }
+        }
+
+        async function drawChart() {
+            const canvas = document.getElementById('candleChart');
+            const ctx = canvas.getContext('2d');
+            canvas.width = canvas.parentElement.clientWidth - 28;
+            canvas.height = 380;
+
+            try {
+                const res = await fetch(apiUrl('/api/candles'));
+                const candles = await res.json();
+                if (!candles || candles.length === 0) return;
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                let minP = Infinity, maxP = -Infinity;
+                candles.forEach(c => {
+                    if (c.low < minP) minP = c.low;
+                    if (c.high > maxP) maxP = c.high;
+                });
+                const pad = (maxP - minP) * 0.08 || 1.0;
+                minP -= pad; maxP += pad;
+
+                const n = candles.length;
+                const candleWidth = Math.max(3.5, (canvas.width / n) * 0.65);
+                const step = canvas.width / n;
+
+                // Asian Range Band
+                candles.forEach((c, idx) => {
+                    const x = idx * step + step / 2;
+                    if (c.asian_high && c.asian_low && c.asian_high > c.asian_low) {
+                        const yAH = canvas.height - ((c.asian_high - minP) / (maxP - minP)) * canvas.height;
+                        const yAL = canvas.height - ((c.asian_low - minP) / (maxP - minP)) * canvas.height;
+                        ctx.fillStyle = 'rgba(245, 179, 36, 0.03)';
+                        ctx.fillRect(x - step/2, yAH, step, yAL - yAH);
+                    }
+                });
+
+                // Candlesticks
+                candles.forEach((c, idx) => {
+                    const x = idx * step + step / 2;
+                    const yOpen = canvas.height - ((c.open - minP) / (maxP - minP)) * canvas.height;
+                    const yClose = canvas.height - ((c.close - minP) / (maxP - minP)) * canvas.height;
+                    const yHigh = canvas.height - ((c.high - minP) / (maxP - minP)) * canvas.height;
+                    const yLow = canvas.height - ((c.low - minP) / (maxP - minP)) * canvas.height;
+
+                    const isGreen = c.close >= c.open;
+                    ctx.strokeStyle = isGreen ? '#10d88b' : '#f75268';
+                    ctx.fillStyle = isGreen ? '#10d88b' : '#f75268';
+
+                    if (c.bull_fvg) {
+                        ctx.fillStyle = 'rgba(16, 216, 139, 0.15)';
+                        ctx.fillRect(x - step/2, yHigh - 5, step, 10);
+                        ctx.fillStyle = '#10d88b';
+                    } else if (c.bear_fvg) {
+                        ctx.fillStyle = 'rgba(247, 82, 104, 0.15)';
+                        ctx.fillRect(x - step/2, yLow - 5, step, 10);
+                        ctx.fillStyle = '#f75268';
+                    }
+
+                    ctx.beginPath();
+                    ctx.lineWidth = 1.2;
+                    ctx.moveTo(x, yHigh);
+                    ctx.lineTo(x, yLow);
+                    ctx.stroke();
+
+                    const top = Math.min(yOpen, yClose);
+                    const h = Math.max(2, Math.abs(yClose - yOpen));
+                    ctx.fillRect(x - candleWidth / 2, top, candleWidth, h);
+                });
+
+                // Latest Price Tag
+                const latest = candles[candles.length - 1];
+                const yLatest = canvas.height - ((latest.close - minP) / (maxP - minP)) * canvas.height;
+                ctx.strokeStyle = '#f5b324';
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(0, yLatest);
+                ctx.lineTo(canvas.width, yLatest);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                const labelText = 'BID: ' + latest.close.toFixed(2);
+                ctx.fillStyle = '#f5b324';
+                ctx.fillRect(canvas.width - 85, yLatest - 11, 85, 22);
+                ctx.fillStyle = '#000000';
+                ctx.font = 'bold 11px sans-serif';
+                ctx.fillText(labelText, canvas.width - 78, yLatest + 4);
+
+            } catch (e) {
+                console.error("drawChart err:", e);
+            }
+        }
+
+        // [D-05] Mini feed event jurnal di panel observasi
+        async function fetchJournal() {
+            try {
+                const res = await fetch(apiUrl('/api/journal?n=8'));
+                const evs = await res.json();
+                const box = document.getElementById('journal-feed');
+                if (!evs || evs.length === 0) { box.innerHTML = '<i>Jurnal kosong — engine belum menulis event.</i>'; return; }
+                const icons = {engine_start:'🟢', engine_stop:'🔴', order_open:'⚡', order_failed:'❌',
+                               signal_detected:'📡', tp_hit:'🎯', be_lock:'🛡️', trail_update:'🚀',
+                               sl_step_to_tp1:'🚀', position_closed:'📕', position_closed_offline:'📗',
+                               position_adopted:'♻️', equity_snapshot:'💰', day_rollover:'📅'};
+                box.innerHTML = evs.map(e => {
+                    const ic = icons[e.event] || '•';
+                    const extra = e.event === 'tp_hit' ? (' L' + e.level) :
+                        (e.realized_total !== undefined ? (' $' + (e.realized_total >= 0 ? '+' : '') + e.realized_total.toFixed(2)) :
+                        (e.ticket ? (' #' + e.ticket) : ''));
+                    return `<div style="padding: 2px 0; border-bottom: 1px solid rgba(32,43,59,.4);">${(e.ts||'').slice(5,16).replace('T',' ')} ${ic} ${e.event}${extra}</div>`;
+                }).join('');
+            } catch (e) { console.error('fetchJournal err:', e); }
+        }
+
+        fetchStatus();
+        fetchStatsAndTrades();
+        drawChart();
+        fetchJournal();
+        setInterval(fetchStatus, 2000);
+        setInterval(fetchStatsAndTrades, 5000);
+        setInterval(drawChart, 8000);
+        setInterval(fetchJournal, 5000);
+    </script>
+</body>
+</html>

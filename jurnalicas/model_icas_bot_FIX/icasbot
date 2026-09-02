@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""
+========================================================================================
+MODEL ICAS AUTONOMOUS BOT - MASTER CLI LAUNCHER
+========================================================================================
+"""
+import sys
+import os
+
+def print_help():
+    print("""
+================================================================================
+             ⚡ MODEL ICAS AUTONOMOUS SCALPER (XAUUSD M5)
+================================================================================
+Perintah Penggunaan:
+  icasbot --live          : Menjalankan Bot Live Trading otomatis terhubung ke MT5
+  icasbot --backtest      : Menjalankan Backtest historis (Default: Juni 2025 - Juni 2026)
+  icasbot --dashboard     : Menjalankan Web Dashboard interaktif real-time di port 5000
+  icasbot --help          : Menampilkan bantuan ini
+
+Contoh:
+  icasbot --live
+  icasbot --backtest --start 2026-01-01 --end 2026-06-30
+================================================================================
+""")
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ['--help', '-h']:
+        print_help()
+        return
+
+    cmd = sys.argv[1]
+    if cmd == '--live':
+        from icas_daemon import main as live_main
+        live_main()
+    elif cmd == '--backtest':
+        sys.argv = [sys.argv[0]] + sys.argv[2:]
+        from run_backtest import main as bt_main  # [FIXED] run_backtest kini punya fungsi main()
+        bt_main()
+    elif cmd == '--dashboard':
+        from run_dashboard import main as dash_main  # [FIXED] run_dashboard kini punya fungsi main()
+        dash_main()
+    else:
+        print(f"[!] Perintah tidak dikenal: {cmd}")
+        print_help()
+
+if __name__ == '__main__':
+    main()

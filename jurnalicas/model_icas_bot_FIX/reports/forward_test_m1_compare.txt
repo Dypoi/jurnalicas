@@ -1,0 +1,55 @@
+================================================================================================================
+ SIMULASI FORWARD TEST LIVE (sequencing M1 definitif, biaya riil, equity $10k, risiko $500/trade)
+================================================================================================================
+
+--- [FORWARD/OOS 2026-07-15 -> 2026-08-25 14:30] ---
+
+>>> CONFIG LAMA  (SL20 | TP20/40/60 | BE10)
+    Trades: 401 (129W/127BE/145L) | WinRate(res) 32.2% | PnL>0: 256 (64%)
+    PF 0.90 | Net $-7,366 (-73.7% modal) | Ekspektasi $-18/trade
+    Equity akhir $2,634 | MaxDD(kurva berjalan) 101.8% (terburuk di trade #305) | Streak loss terpanjang 5
+    Aktivitas: 401 trade / 35 hari trading (~11.5/hari, span 42 hari kalender)
+    AvgWin $+254 | AvgLoss $-500
+    Mingguan: 07-13/2026-07-19: $-1,013(46.0t) | 07-20/2026-07-26: $-2,942(63.0t) | 07-27/2026-08-02: $-1,085(81.0t) | 08-03/2026-08-09: $+2,466(67.0t) | 08-10/2026-08-16: $-7,136(52.0t) | 08-17/2026-08-23: $-266(70.0t) | 08-24/2026-08-30: $+2,611(22.0t)
+
+--- [FORWARD/OOS 2026-07-15 -> 2026-08-25 14:30] ---
+
+>>> CONFIG BARU  (SL150 | TP187.5/375/562.5 | BE OFF)  <- terpasang
+    Trades: 139 (56W/0BE/83L) | WinRate(res) 40.3% | PnL>0: 103 (74%)
+    PF 2.25 | Net $+17,445 (+174.4% modal) | Ekspektasi $+126/trade
+    Equity akhir $27,445 | MaxDD(kurva berjalan) 12.7% (terburuk di trade #39) | Streak loss terpanjang 3
+    Aktivitas: 139 trade / 35 hari trading (~4.0/hari, span 42 hari kalender)
+    AvgWin $+344 | AvgLoss $-500
+    Mingguan: 07-13/2026-07-19: $+2,668(16.0t) | 07-20/2026-07-26: $+3,606(19.0t) | 07-27/2026-08-02: $+3,423(27.0t) | 08-03/2026-08-09: $+4,200(24.0t) | 08-10/2026-08-16: $+386(16.0t) | 08-17/2026-08-23: $+1,336(25.0t) | 08-24/2026-08-30: $+1,826(12.0t)
+
+--- [FORWARD/OOS 2026-07-15 -> 2026-08-25 14:30] ---
+
+>>> Preset ALT   (SL200 | TP200/400/600 | BE60)
+    Trades: 149 (37W/92BE/20L) | WinRate(res) 24.8% | PnL>0: 129 (87%)
+    PF 2.01 | Net $+10,139 (+101.4% modal) | Ekspektasi $+68/trade
+    Equity akhir $20,139 | MaxDD(kurva berjalan) 10.8% (terburuk di trade #41) | Streak loss terpanjang 2
+    Aktivitas: 149 trade / 34 hari trading (~4.4/hari, span 42 hari kalender)
+    AvgWin $+156 | AvgLoss $-500
+    Mingguan: 07-13/2026-07-19: $+1,407(18.0t) | 07-20/2026-07-26: $+1,567(19.0t) | 07-27/2026-08-02: $+2,147(29.0t) | 08-03/2026-08-09: $+3,223(25.0t) | 08-10/2026-08-16: $-314(15.0t) | 08-17/2026-08-23: $+430(28.0t) | 08-24/2026-08-30: $+1,678(15.0t)
+
+================================================================================================================
+ KONTEKS WINDOW PENUH (14 Mei -> 25 Agu) — sequencing M1 yang sama
+================================================================================================================
+  CONFIG LAMA :  916 tr | PF  0.81 | Net $  -33,171 | DD  324.6% | bulan hijau 0/4
+  CONFIG BARU :  326 tr | PF  2.08 | Net $  +38,067 | DD   12.8% | bulan hijau 4/4
+  Preset ALT  :  355 tr | PF  1.77 | Net $  +22,380 | DD   20.1% | bulan hijau 4/4
+
+================================================================================================================
+ ENGINE M5 ASLI (run_backtest) pada window FORWARD yang sama — config LAMA vs BARU
+================================================================================================================
+  ENGINE-KONSERVATIF config LAMA     : 308 tr (114W/32BE/162L) | NLR 47.4% | PF 0.84 | Net $-13,046 | DD 130.0%
+  ENGINE-KONSERVATIF config BARU     : 137 tr (56W/0BE/81L) | NLR 40.9% | PF 2.08 | Net $+18,445 | DD 12.7%
+  ENGINE-LEGACY      config LAMA     : 520 tr (285W/130BE/105L) | NLR 79.8% | PF 2.03 | Net $+60,549 | DD 25.4%
+  ENGINE-LEGACY      config BARU     : 160 tr (48W/0BE/112L) | NLR 30.0% | PF 1.60 | Net $+12,863 | DD 12.8%
+
+================================================================================================================
+ RINGKASAN FORWARD (OOS 6 minggu):
+  CONFIG LAMA  (SL20 | TP20/40/60 | BE10)                      |  401 tr | PF 0.90 | Net $  -7,366 | MaxDD 101.8% | PnL>0   64% | streak-loss 5
+  CONFIG BARU  (SL150 | TP187.5/375/562.5 | BE OFF)  <- terpasang |  139 tr | PF 2.25 | Net $ +17,445 | MaxDD 12.7% | PnL>0   74% | streak-loss 3
+  Preset ALT   (SL200 | TP200/400/600 | BE60)                  |  149 tr | PF 2.01 | Net $ +10,139 | MaxDD 10.8% | PnL>0   87% | streak-loss 2
+================================================================================================================
