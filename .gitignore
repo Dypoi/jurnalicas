@@ -19,5 +19,7 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Dataset M1 besar (451 MB) — sudah ada di origin/main, jangan diduplikasi ke cabang ini
-jurnalicas/XAUUSD_M1/
+# Catatan: jurnalicas/XAUUSD_M1/ (451 MB) SENGAJA di-track agar sama dengan
+# origin/main. Blob-nya identik (git hash-object cocok), jadi tidak menambah
+# objek baru di remote. Jangan hapus dari index: PR ke main akan tampak
+# menghapus dataset.
