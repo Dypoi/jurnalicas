@@ -3,6 +3,7 @@ REGRESSION PARITY TEST — Engine v2 (flag legacy) vs Engine lama (repo asli)
 Harus menghasilkan equity curve & statistik IDENTIK ke bit terakhir.
 """
 import sys
+import os
 import importlib.util
 import dataclasses
 import pandas as pd
@@ -13,8 +14,27 @@ from config import config
 DATA = 'data/historical/xauusd_m5.csv'
 
 # ---- engine lama dari repo asli (referensi) ----
-spec_old = importlib.util.spec_from_file_location(
-    "engine_old", "/home/user/testagent/model_icas_bot/src/backtest/engine.py")
+# [AUDIT FORENSIK 2 — F-13] Path absolut repo lama di-hardcode di sini sehingga
+# test ini MATI (FileNotFoundError) di setiap checkout lain — artinya regresi
+# parity live/backtest tidak pernah benar-benar dijaga. Kini lokasi engine lama
+# dicari berurutan dari: $ICAS_LEGACY_ENGINE, beberapa path kandidat, lalu SKIP
+# eksplisit (bukan crash) bila memang tidak tersedia.
+_CANDIDATES = [
+    os.getenv("ICAS_LEGACY_ENGINE", ""),
+    os.path.expanduser("~/testagent/model_icas_bot/src/backtest/engine.py"),
+    os.path.join("..", "model_icas_bot", "src", "backtest", "engine.py"),
+    os.path.join("..", "..", "model_icas_bot", "src", "backtest", "engine.py"),
+]
+_legacy_path = next((c for c in _CANDIDATES if c and os.path.exists(c)), None)
+if _legacy_path is None:
+    print("=" * 78)
+    print(" SKIP - engine legacy pembanding tidak ditemukan.")
+    print("        Set ICAS_LEGACY_ENGINE=/path/ke/model_icas_bot/src/backtest/engine.py")
+    print("        untuk mengaktifkan regresi parity ini.")
+    print("=" * 78)
+    sys.exit(0)
+print(f"• Engine legacy referensi: {_legacy_path}")
+spec_old = importlib.util.spec_from_file_location("engine_old", _legacy_path)
 engine_old_mod = importlib.util.module_from_spec(spec_old)
 spec_old.loader.exec_module(engine_old_mod)
 

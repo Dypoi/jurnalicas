@@ -12,6 +12,7 @@ Skenario yang diuji:
                          sebelum mengirim perintah ke server.
 """
 import sys
+import time
 import types
 from collections import namedtuple
 
@@ -47,7 +48,7 @@ def symbol_info(sym):
     return SymInfo(point=0.01, digits=2, volume_min=0.01, volume_max=200.0, volume_step=0.01,
                    visible=True, filling_mode=2, trade_stops_level=0, trade_freeze_level=0)
 def symbol_info_tick(sym):
-    return Tick(bid=BID, ask=ASK, time=1767000000)
+    return Tick(bid=BID, ask=ASK, time=int(time.time()))
 def positions_get(*args, **kwargs):
     if "ticket" in kwargs:
         return tuple(p for p in mock._pos if p.ticket == kwargs["ticket"])
@@ -133,7 +134,7 @@ check(f"Bridge menahan SL ilegal {sl_baru:.2f} (tidak dikirim ke server)", ok is
 # Saat harga menjauh $0.31, SL yang sama menjadi sah -> harus terkirim & sukses
 BID_BARU = 4670.00
 def symbol_info_tick2(sym):
-    return Tick(bid=BID_BARU, ask=BID_BARU + 0.26, time=1767000000)
+    return Tick(bid=BID_BARU, ask=BID_BARU + 0.26, time=int(time.time()))
 mock.symbol_info_tick = symbol_info_tick2
 globals()["BID"] = BID_BARU  # mock server pakai variabel global BID
 ok = bridge.modify_sl(4970342345, sl_baru)

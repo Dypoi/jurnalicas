@@ -11,6 +11,7 @@ Skenario:
 """
 import sys
 import os
+import time
 import types
 import tempfile
 from collections import namedtuple
@@ -32,7 +33,7 @@ for k, v in dict(ORDER_TYPE_BUY=0, ORDER_TYPE_SELL=1, POSITION_TYPE_BUY=0, POSIT
                  DEAL_TYPE_BUY=0).items():
     setattr(mock, k, v)
 mock.symbol_info = lambda s: SymInfo(0.01, 2, 0.01, 200.0, 0.01, True, 2, 0, 0)
-mock.symbol_info_tick = lambda s: Tick(4670.00, 4670.26, 1767000000)
+mock.symbol_info_tick = lambda s: Tick(4670.00, 4670.26, int(time.time()))
 mock.symbol_select = lambda s, v: True
 mock.initialize = lambda **k: True
 mock.login = lambda **k: True

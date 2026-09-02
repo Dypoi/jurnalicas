@@ -168,9 +168,27 @@ model_icas_bot/
 │   ├── state_store.py         # Persistensi state atomik (JSON + os.replace)
 │   └── dashboard_app.py       # Flask dashboard (+ token auth)
 ├── templates/index.html
+├── run_qa.py                  # [BARU] satu perintah utk seluruh gerbang kualitas
+├── audit_faults/              # [BARU] mock MT5 + 11 skenario kegagalan koneksi
+│   ├── mock_mt5.py            #   MetaTrader5 palsu dgn 8 mode fault injection
+│   └── poc_faults.py          #   27 assertion (bug error / koneksi terputus)
 ├── verify_*.py                # Tes regresi audit
 └── test_*.py                  # Unit test inti
 ```
+
+## ✅ Gerbang Kualitas (Audit Forensik 2 — 02 Sep 2026)
+
+```bash
+python3 run_qa.py                      # seluruh gerbang: kompilasi + unit + verifikasi + POC + smoke backtest
+python3 audit_faults/poc_faults.py     # 11 skenario kegagalan koneksi (27 assertion)
+python3 audit_faults/poc_faults.py 5   # satu skenario (S-5 = reproduksi bug TP1 dobel)
+```
+
+`audit_faults/` menjalankan **kode daemon & bridge asli** terhadap MetaTrader5 palsu yang bisa
+disuntik kegagalan: `positions_get` kosong/None, tick 0 atau basi, riwayat deal error, ack order
+hilang, dan lainnya. Ini gerbang regresi untuk kelas bug *"error saat koneksi terputus"*.
+
+Temuan lengkap: **`../LAPORAN_AUDIT_FORENSIK_2.md`** (17 temuan: 5 kritis, 5 tinggi, 4 sedang, 3 rendah).
 
 ## 🔐 Catatan Keamanan
 - Kredensial MT5 hanya via environment variable (`MT5_LOGIN/PASSWORD/SERVER`) — jangan commit password.

@@ -1,0 +1,23 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Artefak runtime daemon (dibuat ulang saat engine jalan)
+jurnalicas/model_icas_bot_FIX/logs/trade_journal.health.json
+jurnalicas/model_icas_bot_FIX/logs/*.jsonl.*
+jurnalicas/model_icas_bot_FIX/state/*.tmp
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Dataset M1 besar (451 MB) — sudah ada di origin/main, jangan diduplikasi ke cabang ini
+jurnalicas/XAUUSD_M1/

@@ -37,6 +37,11 @@ class IcasMT5Bridge:
         self.active_position = None
         self.magic_number = 777404 # Unique identifier for Model Icas
         self.simulated_trades_history = []
+        # [AUDIT FORENSIK 2 — F-05] kunci (ticket, tier) partial close yang SUDAH
+        # terbukti tereksekusi. Mencegah partial dobel saat ack order hilang.
+        self._confirmed_partials = set()
+        # [F-17] hasil eksekusi entry terakhir (harga fill nyata dari broker)
+        self.last_fill = None
 
     def initialize(self) -> bool:
         if not MT5_AVAILABLE:
@@ -118,6 +123,21 @@ class IcasMT5Bridge:
         lot = round(round(requested_lot / vol_step) * vol_step, 2)
         lot = max(vol_min, min(vol_max, lot))
         return lot
+
+    def get_min_lot(self) -> float:
+        """[F-12] Lot minimum broker. Dipakai agar partial close tidak mandek:
+        versi lama memakai syarat `close_vol >= 0.01` sehingga pada akun kecil
+        (mis. 0.02 lot) TP1 = round(0.02*0.30,2) = 0.01 -> lolos, tetapi TP2 =
+        round(0.02*0.25,2) = 0.0 -> TIDAK pernah dieksekusi dan tp2_hit tak pernah
+        diset, sehingga TP3 ikut mati selamanya."""
+        if not MT5_AVAILABLE or not self.connected:
+            return 0.01
+        try:
+            sym_info = mt5.symbol_info(self.resolved_symbol)
+            v = float(getattr(sym_info, "volume_min", 0.01) or 0.01) if sym_info else 0.01
+        except Exception:
+            v = 0.01
+        return v if v > 0 else 0.01
 
     def normalize_price(self, price: float) -> float:
         if not MT5_AVAILABLE or not self.connected:
@@ -253,22 +273,100 @@ class IcasMT5Bridge:
             return None
 
     def get_current_tick(self) -> Dict[str, float]:
+        """Tick live + flag kesehatan feed.
+
+        [AUDIT FORENSIK 2 — F-04] Field `valid` DITAMBAHKAN. Sebelumnya tick yang
+        mati dikembalikan sebagai {"bid": 0.0, "ask": 0.0, "spread": 0.0} yang
+        TIDAK bisa dibedakan dari kondisi pasar normal, dan memicu dua bug:
+          • spread 0.0 -> spread guard (MAX_SPREAD_POINTS) SELALU lolos saat feed
+            mati, sehingga order dikirim di harga 0.0;
+          • posisi SELL: fav_usd = entry - ask = entry - 0 = ~$4600 -> max_fav
+            meledak -> TP1+TP2+TP3 dan trailing step 46 menyala sekaligus.
+        Pemanggil WAJIB memeriksa tick["valid"] sebelum mengambil keputusan.
+        """
         if not MT5_AVAILABLE or not self.connected:
-            return {"bid": 3350.00, "ask": 3350.26, "spread": 26.0, "time": int(time.time())}
-        
-        tick = mt5.symbol_info_tick(self.resolved_symbol)
+            return {"bid": 3350.00, "ask": 3350.26, "spread": 26.0,
+                    "time": int(time.time()), "valid": True, "age_seconds": 0.0,
+                    "reason": "simulation"}
+
+        tick = None
+        try:
+            tick = mt5.symbol_info_tick(self.resolved_symbol)
+        except Exception as e:                      # IPC rusak
+            logger.warning(f"symbol_info_tick gagal: {e}")
         if tick is None:
-            return {"bid": 0.0, "ask": 0.0, "spread": 0.0, "time": int(time.time())}
-        
-        sym_info = mt5.symbol_info(self.resolved_symbol)
-        point = sym_info.point if sym_info else 0.01
-        spread_points = (tick.ask - tick.bid) / point if point > 0 else 0.0
+            return {"bid": 0.0, "ask": 0.0, "spread": 0.0, "time": int(time.time()),
+                    "valid": False, "age_seconds": None, "reason": "no_tick"}
+
+        bid = float(getattr(tick, "bid", 0.0) or 0.0)
+        ask = float(getattr(tick, "ask", 0.0) or 0.0)
+        tstamp = int(getattr(tick, "time", 0) or 0)
+
+        sym_info = None
+        try:
+            sym_info = mt5.symbol_info(self.resolved_symbol)
+        except Exception:
+            sym_info = None
+        point = sym_info.point if sym_info and sym_info.point else 0.01
+        spread_points = (ask - bid) / point if point > 0 else 0.0
+
+        # ---- validasi feed ----
+        # Umur tick dihitung dari jam lokal, tetapi jam broker dan jam laptop bisa
+        # meleset. Dua pengaman agar guard ini tidak MEMBLOKIR trading secara salah:
+        #   • age < 0   (jam broker lebih depan) -> dianggap 0, bukan error;
+        #   • age > SKEW_LIMIT (epoch tidak dapat dipercaya / jam lokal meleset jauh) ->
+        #     pemeriksaan umur DILEWATI, jangan menghukum feed yang sebenarnya hidup.
+        # Skenario yang benar-benar ingin ditangkap (laptop sleep beberapa menit
+        # s/d beberapa jam) tetap tertangkap.
+        SKEW_LIMIT = 24 * 3600
+        age = None
+        max_age = int(getattr(self.cfg, "MAX_TICK_AGE_SECONDS", 0) or 0)
+        if tstamp > 0:
+            raw_age = time.time() - tstamp
+            if raw_age < -60:
+                age = 0.0
+            elif raw_age <= SKEW_LIMIT:
+                age = raw_age
+            else:
+                age = None
+        reason = "ok"
+        valid = True
+        if bid <= 0.0 or ask <= 0.0:
+            valid, reason = False, "zero_price"
+        elif ask < bid:
+            valid, reason = False, "inverted_spread"
+        elif age is not None and max_age > 0 and age > max_age:
+            valid, reason = False, f"stale_{age:.0f}s"
+
         return {
-            "bid": tick.bid,
-            "ask": tick.ask,
+            "bid": bid,
+            "ask": ask,
             "spread": round(spread_points, 1),
-            "time": tick.time
+            "time": tstamp or int(time.time()),
+            "valid": valid,
+            "age_seconds": round(age, 1) if age is not None else None,
+            "reason": reason,
         }
+
+    def is_feed_healthy(self) -> bool:
+        """[F-02/F-04] True hanya bila terminal benar-benar terhubung & feed hidup.
+
+        Dipakai sebagai gerbang sebelum menyatakan sebuah tiket "sudah tutup":
+        saat terminal putus koneksi, positions_get() mengembalikan () — bukan None
+        — sehingga posisi yang masih hidup terlihat "hilang".
+
+        Mode simulasi (paket MetaTrader5 tidak terpasang) dianggap sehat agar
+        dashboard/backtest tidak selalu merah; pembedanya ada di field
+        account.is_live_mt5 dan tick.reason == "simulation".
+        """
+        if not MT5_AVAILABLE or not self.connected:
+            return True
+        try:
+            if mt5.account_info() is None:
+                return False
+        except Exception:
+            return False
+        return bool(self.get_current_tick().get("valid"))
 
     def get_latest_m5_candles(self, count: int = 150) -> pd.DataFrame:
         """
@@ -347,7 +445,15 @@ class IcasMT5Bridge:
         """[AUDIT FIX LIVE-01] Second opinion apakah sebuah tiket masih terbuka.
         True/False = MT5 menjawab pasti; None = gangguan IPC (JANGAN simpulkan
         apa-apa dan jangan hapus state). Pembeda True/None inilah yang mencegah
-        'position closed' palsu saat positions_get miss transien."""
+        'position closed' palsu saat positions_get miss transien.
+
+        [AUDIT FORENSIK 2 — F-02] DIPERKETAT. Temuan forensik jurnal produksi:
+        saat terminal MT5 kehilangan koneksi ke broker, positions_get() tetap
+        mengembalikan tuple KOSONG (bukan None). Kode lama membaca itu sebagai
+        "pasti sudah tutup" (False) -> 5x miss -> posisi dinyatakan tutup dan
+        state manajemennya dihapus. Kini, jawaban False hanya diberikan bila
+        feed & terminal terbukti sehat (is_feed_healthy); selain itu -> None.
+        """
         try:
             tk = int(ticket)
         except (TypeError, ValueError):
@@ -360,7 +466,83 @@ class IcasMT5Bridge:
             return None
         if pos is None:
             return None   # IPC bermasalah -> tidak diketahui
-        return any(p.ticket == tk and p.magic == self.magic_number for p in pos)
+        found = any(p.ticket == tk and p.magic == self.magic_number for p in pos)
+        if found:
+            return True
+        # Tidak ditemukan. Hanya boleh disimpulkan "tutup" bila terminal sehat.
+        if not self.is_feed_healthy():
+            return None
+        return False
+
+    def get_position_closed_volume(self, ticket) -> Optional[float]:
+        """[F-03] Total lot yang sudah DITUTUP (deal OUT) untuk sebuah tiket.
+
+        Return None bila riwayat tidak terbaca (jangan disimpulkan apa-apa).
+        Dipakai untuk membuktikan bahwa sebuah posisi benar-benar sudah lunas
+        sebelum state manajemennya dipindahkan ke tombstone.
+        """
+        if not MT5_AVAILABLE or not self.connected:
+            return None
+        try:
+            tk = int(ticket)
+        except (TypeError, ValueError):
+            return None
+        try:
+            date_from = datetime.datetime.now() - datetime.timedelta(days=30)
+            date_to = datetime.datetime.now() + datetime.timedelta(days=1)
+            deals = mt5.history_deals_get(date_from, date_to)
+        except Exception as e:
+            logger.warning(f"history_deals_get gagal saat cek volume tiket {tk}: {e}")
+            return None
+        if deals is None:
+            return None
+        total = 0.0
+        seen = False
+        for d in deals:
+            try:
+                if int(getattr(d, "position_id", -1)) != tk:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            entry = getattr(d, "entry", None)
+            if entry in (getattr(mt5, "DEAL_ENTRY_OUT", 1), getattr(mt5, "DEAL_ENTRY_INOUT", 3)):
+                total += float(getattr(d, "volume", 0.0) or 0.0)
+                seen = True
+        return round(total, 2) if seen else 0.0
+
+    def count_partial_deals(self, ticket) -> Optional[int]:
+        """[F-03] Jumlah deal OUT untuk sebuah tiket (0 bila belum ada partial).
+
+        Lebih andal daripada mencocokkan komentar "Model Icas Partial TP":
+        banyak broker (termasuk Exness) menimpa komentar deal, sehingga
+        infer_position_state versi lama mengembalikan 0 partial dan memicu
+        eksekusi ulang TP1.
+        """
+        if not MT5_AVAILABLE or not self.connected:
+            return None
+        try:
+            tk = int(ticket)
+        except (TypeError, ValueError):
+            return None
+        try:
+            date_from = datetime.datetime.now() - datetime.timedelta(days=30)
+            date_to = datetime.datetime.now() + datetime.timedelta(days=1)
+            deals = mt5.history_deals_get(date_from, date_to)
+        except Exception:
+            return None
+        if deals is None:
+            return None
+        n = 0
+        for d in deals:
+            try:
+                if int(getattr(d, "position_id", -1)) != tk:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            if getattr(d, "entry", None) in (getattr(mt5, "DEAL_ENTRY_OUT", 1),
+                                             getattr(mt5, "DEAL_ENTRY_INOUT", 3)):
+                n += 1
+        return n
 
     def get_open_position_details(self) -> Optional[Dict[str, Any]]:
         if not MT5_AVAILABLE or not self.connected:
@@ -405,6 +587,13 @@ class IcasMT5Bridge:
             return None
 
         tick = self.get_current_tick()
+        # [AUDIT FORENSIK 2 — F-04] Feed mati mengembalikan spread 0.0 sehingga
+        # spread guard di bawah SELALU lolos dan order terkirim di harga 0.0.
+        # Validasi feed harus berjalan LEBIH DULU.
+        if not tick.get("valid", True):
+            logger.error(f"❌ Order DITOLAK: feed harga tidak valid "
+                         f"({tick.get('reason')}) — tidak boleh entry tanpa harga live.")
+            return None
         if tick["spread"] > self.cfg.MAX_SPREAD_POINTS:
             logger.warning(f"Order rejected: Spread ({tick['spread']:.1f} pts) exceeds maximum allowable ({self.cfg.MAX_SPREAD_POINTS} pts).")
             return None
@@ -483,8 +672,38 @@ class IcasMT5Bridge:
             logger.error(f"❌ MT5 order_send failed: retcode={res.retcode} ({res.comment})")
             return None
 
-        logger.info(f"🚀 MT5 ORDER EXECUTED! Ticket: {res.order} | {order_type} {norm_lot} lots @ {res.price:.2f} | SL: {norm_sl:.2f}")
-        return res.order
+        # [F-17] Simpan harga fill AKTUAL dari broker. Sebelumnya jurnal hanya
+        # mencatat harga SINYAL (close bar M5 terakhir), sehingga slippage &
+        # kualitas eksekusi tidak bisa diukur sama sekali dari jurnal.
+        self.last_fill = {
+            "ticket": getattr(res, "order", None),
+            "price": float(getattr(res, "price", 0.0) or 0.0),
+            "signal_price": float(price),
+            "volume": float(getattr(res, "volume", norm_lot) or norm_lot),
+        }
+
+        # [AUDIT FORENSIK 2 — F-09] res.order adalah NOMOR ORDER, belum tentu sama
+        # dengan nomor POSISI yang dipakai positions_get(ticket=...). Bila berbeda,
+        # seluruh manajemen TP/BE/trailing akan gagal diam-diam selamanya.
+        real_ticket = self._resolve_position_ticket(res, m_type, norm_lot)
+        logger.info(f"🚀 MT5 ORDER EXECUTED! Ticket: {real_ticket} | {order_type} {norm_lot} lots @ {res.price:.2f} | SL: {norm_sl:.2f}")
+        return real_ticket
+
+    def _resolve_position_ticket(self, res, m_type, norm_lot) -> int:
+        """Ambil nomor POSISI sesungguhnya setelah entry berhasil."""
+        fallback = getattr(res, "order", None) or getattr(res, "deal", None)
+        try:
+            for _ in range(10):
+                positions = self._bot_positions()
+                if positions:
+                    # posisi terbaru milik bot ini
+                    cand = max(positions, key=lambda p: getattr(p, "time", 0) or 0)
+                    if abs(getattr(cand, "volume", 0.0) - norm_lot) < 1e-6 or len(positions) == 1:
+                        return int(cand.ticket)
+                time.sleep(0.1)
+        except Exception as e:
+            logger.warning(f"Verifikasi tiket posisi gagal, pakai res.order: {e}")
+        return fallback
 
     def get_point(self) -> float:
         """Nilai point simbol ($/point): 0.01 utk XAUUSD 2-digit, 0.001 utk XAUUSDm 3-digit."""
@@ -544,6 +763,14 @@ class IcasMT5Bridge:
     def modify_sl(self, ticket: int, new_sl: float) -> bool:
         norm_sl = self.normalize_price(new_sl)
 
+        # [AUDIT FORENSIK 2 — F-04] jangan kirim SL berbasis feed mati
+        if MT5_AVAILABLE and self.connected:
+            _t = self.get_current_tick()
+            if not _t.get("valid", True):
+                logger.warning(f"⏳ modify_sl tiket {ticket} DITAHAN: feed tidak valid "
+                               f"({_t.get('reason')}).")
+                return False
+
         if not MT5_AVAILABLE or not self.connected:
             if self.active_position and self.active_position.get("ticket") == ticket:
                 if abs(self.active_position.get("sl", 0.0) - norm_sl) < 1e-4:
@@ -600,9 +827,15 @@ class IcasMT5Bridge:
         berjalan dari riwayat deal MT5 — dipakai saat daemon restart dan file
         state lokal hilang/korup.
 
-        Logika: hitung deal OUT dengan comment 'Model Icas Partial TP' milik
-        position_id tiket ini -> 1 partial = TP1, 2 = TP2, 3 = TP3.
-        be_set/trail_step diinferensi dari jarak SL saat ini terhadap entry.
+        Logika: hitung deal OUT milik position_id tiket ini -> 1 partial = TP1,
+        2 = TP2, 3 = TP3. be_set/trail_step diinferensi dari jarak SL saat ini
+        terhadap entry.
+
+        [AUDIT FORENSIK 2 — F-03] Versi lama hanya menghitung deal yang
+        KOMENTAR-nya memuat 'Model Icas Partial TP'. Banyak broker menimpa
+        komentar deal, sehingga partials terhitung 0 padahal TP1 sudah jalan ->
+        state dipulihkan sebagai "belum TP1" -> TP1 dieksekusi ulang. Kini
+        pencocokan komentar hanya dipakai sebagai fallback.
         """
         inferred: Dict[str, Any] = {}
         if not MT5_AVAILABLE or not self.connected:
@@ -614,10 +847,30 @@ class IcasMT5Bridge:
             deals = mt5.history_deals_get(date_from, date_to)
             partials = 0
             if deals:
+                try:
+                    _pid_want = int(pos.get("ticket"))
+                except (TypeError, ValueError):
+                    _pid_want = None
                 for d in deals:
-                    if getattr(d, "position_id", 0) == pos.get("ticket") and \
-                       "Partial TP" in (getattr(d, "comment", "") or ""):
-                        partials += 1
+                    try:
+                        _pid = int(getattr(d, "position_id", -1))
+                    except (TypeError, ValueError):
+                        continue
+                    if _pid_want is None or _pid != _pid_want:
+                        continue
+                    if getattr(d, "entry", None) not in (
+                            getattr(mt5, "DEAL_ENTRY_OUT", 1),
+                            getattr(mt5, "DEAL_ENTRY_INOUT", 3)):
+                        continue
+                    # deal OUT yang menutup SELURUH sisa posisi = exit final,
+                    # bukan partial. Hanya dihitung partial bila masih ada sisa.
+                    partials += 1
+                # koreksi: deal OUT terakhir biasanya exit final (SL/trailing),
+                # bukan partial TP. Jumlah partial = deal OUT - 1 bila posisi
+                # sudah tidak terbuka, atau deal OUT bila posisi MASIH terbuka.
+                still_open = self.is_ticket_open(pos.get("ticket")) is True
+                if partials > 0 and not still_open:
+                    partials -= 1
             inferred["tp1_hit"] = partials >= 1
             inferred["tp2_hit"] = partials >= 2
             inferred["tp3_hit"] = partials >= 3
@@ -647,7 +900,16 @@ class IcasMT5Bridge:
             logger.warning(f"Gagal rebuild state dari riwayat deal: {e}")
         return inferred
 
-    def close_partial(self, ticket: int, close_volume: float) -> bool:
+    def close_partial(self, ticket: int, close_volume: float, tier: Optional[int] = None) -> bool:
+        """Tutup sebagian posisi.
+
+        [AUDIT FORENSIK 2 — F-05] IDEMPOTEN PER TIER.
+        Bug: bila koneksi putus tepat SESUDAH server mengeksekusi order, order_send
+        mengembalikan None. Daemon membaca itu sebagai "gagal" lalu mengirim ulang
+        pada polling berikutnya -> partial close DOBEL (terbukti: 0.10 lot + 0.10 lot
+        untuk satu tier TP1, sisa posisi 0.13 dari 0.33).
+        Kini tiap tier dicatat; sebelum kirim, riwayat deal broker dicek dulu.
+        """
         norm_close_vol = self.normalize_lot(close_volume)
 
         if not MT5_AVAILABLE or not self.connected:
@@ -655,6 +917,20 @@ class IcasMT5Bridge:
                 self.active_position["volume"] = max(0.0, round(self.active_position["volume"] - norm_close_vol, 2))
                 logger.info(f"[SIMULATED MT5] Partial Close: Closed {norm_close_vol:.2f} lots | Remaining: {self.active_position['volume']:.2f} lots")
                 return True
+            return False
+
+        # ---- [F-05a] guard idempotensi: tier ini sudah pernah dieksekusi? ----
+        key = (int(ticket), tier) if tier is not None else None
+        if key is not None and key in self._confirmed_partials:
+            logger.info(f"♻️ Partial close tier {tier} tiket {ticket} sudah tereksekusi "
+                        f"sebelumnya — perintah duplikat DITAHAN.")
+            return True
+
+        # ---- [F-04] jangan pernah mengirim order dengan harga dari feed mati ----
+        tick = self.get_current_tick()
+        if not tick.get("valid", True):
+            logger.warning(f"⏳ Partial close tiket {ticket} DITAHAN: feed tidak valid "
+                           f"({tick.get('reason')}).")
             return False
 
         pos = mt5.positions_get(ticket=ticket)
@@ -666,7 +942,6 @@ class IcasMT5Bridge:
         if actual_close_vol <= 0:
             return False
 
-        tick = self.get_current_tick()
         close_type = mt5.ORDER_TYPE_SELL if p.type == mt5.POSITION_TYPE_BUY else mt5.ORDER_TYPE_BUY
         price = tick["bid"] if p.type == mt5.POSITION_TYPE_BUY else tick["ask"]
         fill_mode = self.get_filling_mode()
@@ -680,7 +955,7 @@ class IcasMT5Bridge:
             "price": price,
             "deviation": 50,
             "magic": self.magic_number,
-            "comment": "Model Icas Partial TP",
+            "comment": f"Model Icas Partial TP{tier}" if tier else "Model Icas Partial TP",
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": fill_mode,
         }
@@ -695,6 +970,15 @@ class IcasMT5Bridge:
                     break
 
         if res is None:
+            # ---- [F-05b] ack hilang: order mungkin SUDAH filled di server ----
+            filled = self._probe_partial_filled(ticket, actual_close_vol)
+            if filled:
+                logger.warning(f"⚠️ order_send None pada partial close tiket {ticket}, "
+                               f"tetapi riwayat broker menunjukkan {filled:.2f} lot SUDAH "
+                               f"tertutup -> dianggap berhasil (anti dobel-close).")
+                if key is not None:
+                    self._confirmed_partials.add(key)
+                return True
             logger.error(f"❌ order_send returned None during partial close of ticket {ticket}: {mt5.last_error()}")
             return False
 
@@ -702,6 +986,38 @@ class IcasMT5Bridge:
             logger.error(f"❌ Failed partial close for ticket {ticket}: {res.comment}")
             return False
 
+        if key is not None:
+            self._confirmed_partials.add(key)
         logger.info(f"🎯 Partial Close Executed: Ticket {ticket} closed {actual_close_vol:.2f} lots")
         time.sleep(0.15)
         return True
+
+    def _probe_partial_filled(self, ticket: int, expected_vol: float) -> float:
+        """[F-05b] Cari deal OUT terakhir yang cocok dengan volume yang diminta.
+
+        Mengembalikan volume yang terbukti filled, atau 0.0 bila tidak ada.
+        """
+        try:
+            date_from = datetime.datetime.now() - datetime.timedelta(days=1)
+            date_to = datetime.datetime.now() + datetime.timedelta(days=1)
+            deals = mt5.history_deals_get(date_from, date_to)
+        except Exception:
+            return 0.0
+        if not deals:
+            return 0.0
+        best = 0.0
+        for d in deals:
+            try:
+                if int(getattr(d, "position_id", -1)) != int(ticket):
+                    continue
+            except (TypeError, ValueError):
+                continue
+            if getattr(d, "entry", None) != getattr(mt5, "DEAL_ENTRY_OUT", 1):
+                continue
+            vol = float(getattr(d, "volume", 0.0) or 0.0)
+            # toleransi 1 step lot — bandingkan dengan volume yang diminta
+            if abs(vol - expected_vol) <= 0.011:
+                t = int(getattr(d, "time", 0) or 0)
+                if t >= time.time() - 120:
+                    best = max(best, vol)
+        return best
