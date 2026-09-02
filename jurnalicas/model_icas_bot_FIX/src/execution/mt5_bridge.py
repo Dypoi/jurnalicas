@@ -37,6 +37,11 @@ class IcasMT5Bridge:
         self.active_position = None
         self.magic_number = 777404 # Unique identifier for Model Icas
         self.simulated_trades_history = []
+        # [AUDIT FIX DC-03] True bila pembacaan positions_get terakhir dijawab
+        # pasti oleh terminal; False = None/IPC bermasalah -> status posisi TIDAK
+        # DIKETAHUI (daemon wajib berhenti bertindak, bukan menganggap kosong).
+        self.positions_query_ok = True
+        self.reconnect_count = 0
 
     def initialize(self) -> bool:
         if not MT5_AVAILABLE:
@@ -48,7 +53,12 @@ class IcasMT5Bridge:
         if self.cfg.MT5_PATH:
             init_kwargs["path"] = self.cfg.MT5_PATH
 
-        if not mt5.initialize(**init_kwargs):
+        try:
+            init_ok = mt5.initialize(**init_kwargs)
+        except Exception as e:  # IPC benar-benar rusak (terminal ditutup / sleep)
+            logger.error(f"MT5 initialization raised: {e}")
+            init_ok = False
+        if not init_ok:
             logger.error(f"MT5 initialization failed: {mt5.last_error()}")
             self.connected = False
             return False
@@ -68,6 +78,52 @@ class IcasMT5Bridge:
         self.connected = True
         logger.info(f"✅ MT5 Connected successfully! Broker Symbol: {self.resolved_symbol} | Server: {self.cfg.MT5_SERVER}")
         return True
+
+    # ------------------------------------------------------------------
+    # [AUDIT FIX DC-01] Kesehatan koneksi & reconnect otomatis
+    # ------------------------------------------------------------------
+    def is_terminal_connected(self) -> bool:
+        """
+        True hanya jika terminal MT5 masih hidup (IPC OK) DAN terminal itu
+        sendiri terhubung ke server broker (terminal_info().connected).
+
+        Insiden 2 Sep 2026 10:04-15:20 WIB: 22 snapshot berturut-turut
+        balance=10000.0 / equity=None (angka INITIAL_CAPITAL, bukan akun nyata)
+        selama 5 jam — daemon tidak pernah tahu koneksinya putus dan tetap
+        "mengelola" posisi 5025658205 dengan data palsu.
+        """
+        if not MT5_AVAILABLE:
+            return self.connected
+        if not self.connected:
+            return False
+        try:
+            ti = mt5.terminal_info()
+        except Exception:
+            return False
+        if ti is None:
+            return False
+        # terminal_info.connected = status link terminal <-> server broker
+        return bool(getattr(ti, "connected", True))
+
+    def reconnect(self, max_attempts: int = 1, backoff_s: float = 0.0) -> bool:
+        """Coba shutdown + initialize ulang IPC MT5. Return True bila sehat kembali."""
+        if not MT5_AVAILABLE:
+            return self.connected
+        for att in range(max(1, max_attempts)):
+            try:
+                mt5.shutdown()
+            except Exception:
+                pass
+            self.connected = False
+            self.active_position = None   # dict lama tidak boleh dipercaya pasca reconnect
+            time.sleep(backoff_s if att else 0.0)
+            # Sehat = IPC hidup + terminal terhubung ke broker + ADA tick valid
+            # (tanpa tick, koneksi tidak bisa dipakai untuk manajemen posisi).
+            if self.initialize() and self.is_terminal_connected() and self.get_current_tick() is not None:
+                self.reconnect_count += 1
+                logger.info(f"🔌 MT5 reconnect berhasil (percobaan {att + 1}, total reconnect sesi ini: {self.reconnect_count})")
+                return True
+        return False
 
     def resolve_symbol(self) -> str:
         if not MT5_AVAILABLE or not self.connected:
@@ -130,9 +186,29 @@ class IcasMT5Bridge:
     def get_account_details(self) -> Dict[str, Any]:
         """
         Returns full live telemetry of the connected MT5 account.
+
+        [AUDIT FIX DC-05] Bila paket MT5 ADA tetapi account_info() None
+        (koneksi putus), DULU fungsi ini diam-diam mengembalikan blok simulasi
+        (balance = INITIAL_CAPITAL = 10000, "TERHUBUNG ✅") -> jurnal 2 Sep 2026
+        merekam 22× balance 10000.0 palsu dan dashboard tetap hijau. Kini
+        mengembalikan blok DISCONNECTED eksplisit (connected=False, balance None).
         """
         if MT5_AVAILABLE and self.connected:
-            acc = mt5.account_info()
+            try:
+                acc = mt5.account_info()
+            except Exception:
+                acc = None
+            if acc is None:
+                return {
+                    "connected": False,
+                    "is_live_mt5": True,
+                    "status_text": "KONEKSI MT5 TERPUTUS ❌ (account_info None)",
+                    "login": self.cfg.MT5_LOGIN,
+                    "name": "-", "server": self.cfg.MT5_SERVER or "-",
+                    "trade_mode": "UNKNOWN", "currency": "USD", "leverage": "-",
+                    "balance": None, "equity": None, "margin": None,
+                    "margin_free": None, "margin_level": None, "floating_pnl": None,
+                }
             if acc is not None:
                 trade_mode_str = "DEMO"
                 if hasattr(mt5, "ACCOUNT_TRADE_MODE_REAL") and acc.trade_mode == mt5.ACCOUNT_TRADE_MODE_REAL:
@@ -178,9 +254,14 @@ class IcasMT5Bridge:
             "floating_pnl": 0.0
         }
 
-    def get_account_balance(self) -> float:
+    def get_account_balance(self) -> Optional[float]:
+        """Balance akun. None bila koneksi MT5 putus (jangan pakai INITIAL_CAPITAL
+        sebagai pengganti diam-diam — lihat DC-05)."""
         acc = self.get_account_details()
-        return acc.get("balance", self.cfg.INITIAL_CAPITAL)
+        bal = acc.get("balance", None)
+        if bal is None and not (MT5_AVAILABLE and self.connected):
+            return self.cfg.INITIAL_CAPITAL
+        return bal
 
     def get_account_equity(self) -> Optional[float]:
         """Equity realtime (balance + floating). None bila tidak tersedia."""
@@ -252,14 +333,27 @@ class IcasMT5Bridge:
             logger.warning(f"get_position_realized gagal utk tiket {ticket}: {e}")
             return None
 
-    def get_current_tick(self) -> Dict[str, float]:
+    def get_current_tick(self) -> Optional[Dict[str, float]]:
+        """
+        Tick terkini. [AUDIT FIX DC-02] Mengembalikan **None** bila terminal
+        tidak memberi tick (IPC putus / simbol tak tersedia / pasar tutup tanpa
+        cache) — BUKAN lagi {"bid":0,"ask":0,"spread":0}.
+
+        Bug lama: bid=0 membuat fav_usd SELL = entry - 0 ≈ +$4.600 (=46.000 pips)
+        sehingga TP1/TP2/TP3 & trailing menembak beruntun, spread-guard lolos
+        (0 <= 350) dan SL-clearance lolos (ask=0). Semua pemanggil kini wajib
+        menangani None (daemon: lewati siklus & tandai koneksi bermasalah).
+        """
         if not MT5_AVAILABLE or not self.connected:
             return {"bid": 3350.00, "ask": 3350.26, "spread": 26.0, "time": int(time.time())}
-        
-        tick = mt5.symbol_info_tick(self.resolved_symbol)
-        if tick is None:
-            return {"bid": 0.0, "ask": 0.0, "spread": 0.0, "time": int(time.time())}
-        
+
+        try:
+            tick = mt5.symbol_info_tick(self.resolved_symbol)
+        except Exception:
+            tick = None
+        if tick is None or not (tick.bid > 0.0 and tick.ask > 0.0):
+            return None
+
         sym_info = mt5.symbol_info(self.resolved_symbol)
         point = sym_info.point if sym_info else 0.01
         spread_points = (tick.ask - tick.bid) / point if point > 0 else 0.0
@@ -273,18 +367,28 @@ class IcasMT5Bridge:
     def get_latest_m5_candles(self, count: int = 150) -> pd.DataFrame:
         """
         Fetches live real-time M5 candles directly from MT5 terminal.
+
+        [AUDIT FIX DC-04] Saat MT5 tersedia tapi copy_rates_from_pos gagal
+        (koneksi putus), fungsi ini DULU jatuh ke CSV repo (data Juli 2026 yang
+        beku) dan daemon mengevaluasi sinyal di atas bar basi. Kini: kembalikan
+        DataFrame kosong -> daemon melewati scan. CSV fallback hanya untuk mode
+        simulasi (paket MetaTrader5 tidak terpasang).
         """
         if MT5_AVAILABLE and self.connected:
-            rates = mt5.copy_rates_from_pos(self.resolved_symbol, mt5.TIMEFRAME_M5, 0, count)
-            if rates is not None and len(rates) > 0:
-                df = pd.DataFrame(rates)
-                df['time'] = pd.to_datetime(df['time'], unit='s')
-                tick = self.get_current_tick()
-                if tick["bid"] > 0 and len(df) > 0:
-                    df.loc[df.index[-1], 'close'] = tick['bid']
-                    df.loc[df.index[-1], 'high'] = max(df.loc[df.index[-1], 'high'], tick['bid'])
-                    df.loc[df.index[-1], 'low'] = min(df.loc[df.index[-1], 'low'], tick['bid'])
-                return df
+            try:
+                rates = mt5.copy_rates_from_pos(self.resolved_symbol, mt5.TIMEFRAME_M5, 0, count)
+            except Exception:
+                rates = None
+            if rates is None or len(rates) == 0:
+                return pd.DataFrame()
+            df = pd.DataFrame(rates)
+            df['time'] = pd.to_datetime(df['time'], unit='s')
+            tick = self.get_current_tick()
+            if tick is not None and tick["bid"] > 0 and len(df) > 0:
+                df.loc[df.index[-1], 'close'] = tick['bid']
+                df.loc[df.index[-1], 'high'] = max(df.loc[df.index[-1], 'high'], tick['bid'])
+                df.loc[df.index[-1], 'low'] = min(df.loc[df.index[-1], 'low'], tick['bid'])
+            return df
 
         csv_path = "data/historical/xauusd_m5.csv"
         try:
@@ -332,16 +436,39 @@ class IcasMT5Bridge:
         return self.simulated_trades_history
 
     def _bot_positions(self):
-        """Positions on our symbol opened by THIS bot only (magic number filter)."""
-        positions = mt5.positions_get(symbol=self.resolved_symbol)
+        """Positions on our symbol opened by THIS bot only (magic number filter).
+
+        [AUDIT FIX DC-03] `positions_get` mengembalikan None saat IPC bermasalah
+        dan () saat benar-benar kosong. Keduanya DULU disamakan menjadi [] ->
+        has_open_positions() False -> mutex 1-posisi bisa tembus (order kedua
+        saat koneksi kedip) dan daemon menghitung "miss" penutupan palsu.
+        Kini None dicatat di self.positions_query_ok=False dan pemanggil yang
+        peduli (send_order, get_open_position_details) bersikap konservatif.
+        """
+        try:
+            positions = mt5.positions_get(symbol=self.resolved_symbol)
+        except Exception:
+            positions = None
         if positions is None:
+            self.positions_query_ok = False
             return []
+        self.positions_query_ok = True
         return [p for p in positions if p.magic == self.magic_number]
 
     def has_open_positions(self) -> bool:
         if not MT5_AVAILABLE or not self.connected:
             return self.active_position is not None
         return len(self._bot_positions()) > 0
+
+    def has_open_positions_strict(self) -> Optional[bool]:
+        """True/False bila terminal menjawab pasti; None bila tidak diketahui
+        (IPC). Dipakai mutex send_order: None => TOLAK order (fail-closed)."""
+        if not MT5_AVAILABLE or not self.connected:
+            return self.active_position is not None
+        n = len(self._bot_positions())
+        if not self.positions_query_ok:
+            return None
+        return n > 0
 
     def is_ticket_open(self, ticket) -> Optional[bool]:
         """[AUDIT FIX LIVE-01] Second opinion apakah sebuah tiket masih terbuka.
@@ -368,7 +495,12 @@ class IcasMT5Bridge:
 
         bot_positions = self._bot_positions()
         if len(bot_positions) == 0:
-            self.active_position = None
+            # [AUDIT FIX DC-03] Bila positions_get None (IPC), JANGAN buang
+            # dict posisi yang sedang dikelola: kembalikan None ke daemon (yang
+            # akan mengecek positions_query_ok) tapi pertahankan active_position
+            # agar merge-state & max_fav tidak hilang saat koneksi pulih.
+            if self.positions_query_ok:
+                self.active_position = None
             return None
 
         p = bot_positions[0]
@@ -400,11 +532,20 @@ class IcasMT5Bridge:
         return self.active_position
 
     def send_order(self, order_type: str, lot_size: float, sl_price: float, tp_price: Optional[float] = None) -> Optional[int]:
-        if self.has_open_positions():
+        # [AUDIT FIX DC-03] Mutex fail-closed: bila status posisi TIDAK DIKETAHUI
+        # (positions_get None saat IPC kedip), order ditolak — bukan dianggap kosong.
+        mutex_state = self.has_open_positions_strict()
+        if mutex_state is None:
+            logger.warning("Order rejected: status posisi tidak dapat dibaca dari MT5 (IPC) — mutex fail-closed.")
+            return None
+        if mutex_state:
             logger.warning("Order rejected by Mutex Lock: Another position is already active.")
             return None
 
         tick = self.get_current_tick()
+        if tick is None:
+            logger.warning("Order rejected: tidak ada tick valid dari MT5 (koneksi/feed bermasalah).")
+            return None
         if tick["spread"] > self.cfg.MAX_SPREAD_POINTS:
             logger.warning(f"Order rejected: Spread ({tick['spread']:.1f} pts) exceeds maximum allowable ({self.cfg.MAX_SPREAD_POINTS} pts).")
             return None
@@ -524,8 +665,11 @@ class IcasMT5Bridge:
         Validates that the requested SL is on the legal side of the market
         with at least get_min_stop_distance() clearance. Prevents 10016.
         """
-        tick = mt5.symbol_info_tick(self.resolved_symbol)
-        if tick is None:
+        try:
+            tick = mt5.symbol_info_tick(self.resolved_symbol)
+        except Exception:
+            tick = None
+        if tick is None or not (tick.bid > 0.0 and tick.ask > 0.0):
             return False, "No live tick available; deferring SL modification"
 
         min_gap = self.get_min_stop_distance()
@@ -546,20 +690,45 @@ class IcasMT5Bridge:
 
         if not MT5_AVAILABLE or not self.connected:
             if self.active_position and self.active_position.get("ticket") == ticket:
-                if abs(self.active_position.get("sl", 0.0) - norm_sl) < 1e-4:
+                cur_sl = self.active_position.get("sl", 0.0) or 0.0
+                if abs(cur_sl - norm_sl) < 1e-4:
                     return True
+                # [AUDIT FIX SL-01] never-loosen juga di jalur simulasi (paritas dgn live)
+                if cur_sl > 0.0:
+                    if self.active_position.get("type") == "BUY" and norm_sl < cur_sl - 1e-9:
+                        logger.info(f"[SIMULATED MT5] 🚫 SL modify DITOLAK (never-loosen) BUY {cur_sl:.2f} -> {norm_sl:.2f}")
+                        return False
+                    if self.active_position.get("type") == "SELL" and norm_sl > cur_sl + 1e-9:
+                        logger.info(f"[SIMULATED MT5] 🚫 SL modify DITOLAK (never-loosen) SELL {cur_sl:.2f} -> {norm_sl:.2f}")
+                        return False
                 self.active_position["sl"] = norm_sl
                 logger.info(f"[SIMULATED MT5] SL Modified for Ticket {ticket} -> New SL: {norm_sl:.2f}")
                 return True
             return False
 
-        pos = mt5.positions_get(ticket=ticket)
+        try:
+            pos = mt5.positions_get(ticket=ticket)
+        except Exception:
+            pos = None
         if pos is None or len(pos) == 0:
             return False
 
         p = pos[0]
         if abs(p.sl - norm_sl) < 0.005:
             return True  # Redundancy guard: avoids 10025 "No changes"
+
+        # [AUDIT FIX SL-01] NEVER LOOSEN: SL hanya boleh bergerak ke arah profit.
+        # Jurnal 27-31 Agu 2026: 9 kali `be_lock` pasca-TP1 MENURUNKAN SL yang
+        # sudah dinaikkan trailing (mis. tiket 4988300823: SL 4606.893 -> 4629.333,
+        # melonggarkan 224 pips; tiket 4987805272: -124 pips). Guard ini berlaku
+        # untuk SEMUA pemanggil (BE+, post-TP1, step-to-TP1, trailing).
+        if p.sl and p.sl > 0.0:
+            if p.type == mt5.POSITION_TYPE_BUY and norm_sl < p.sl - 1e-9:
+                logger.info(f"🚫 SL modify DITOLAK (never-loosen): BUY ticket {ticket} SL {p.sl:.3f} -> {norm_sl:.3f} akan MELONGGARKAN proteksi.")
+                return False
+            if p.type == mt5.POSITION_TYPE_SELL and norm_sl > p.sl + 1e-9:
+                logger.info(f"🚫 SL modify DITOLAK (never-loosen): SELL ticket {ticket} SL {p.sl:.3f} -> {norm_sl:.3f} akan MELONGGARKAN proteksi.")
+                return False
 
         # --- HARD GUARD vs 10016 (Invalid stops): never send an SL that is
         # on the wrong side of the market or inside the broker stop level ---
@@ -613,19 +782,46 @@ class IcasMT5Bridge:
             date_to = datetime.datetime.now() + datetime.timedelta(days=1)
             deals = mt5.history_deals_get(date_from, date_to)
             partials = 0
+            out_volume = 0.0
+            have_volume = True
+            try:
+                ticket_key = int(pos.get("ticket"))
+            except (TypeError, ValueError):
+                ticket_key = pos.get("ticket")
             if deals:
                 for d in deals:
-                    if getattr(d, "position_id", 0) == pos.get("ticket") and \
-                       "Partial TP" in (getattr(d, "comment", "") or ""):
+                    try:
+                        same_pos = int(getattr(d, "position_id", 0)) == ticket_key
+                    except (TypeError, ValueError):
+                        same_pos = getattr(d, "position_id", 0) == ticket_key
+                    if not same_pos:
+                        continue
+                    # [AUDIT FIX ST-03] Hitung SEMUA deal OUT posisi yang masih terbuka
+                    # (= partial close), bukan hanya yang ber-comment "Partial TP":
+                    # broker bisa menimpa comment -> partials=0 -> TP1 ditembak ulang
+                    # (tiket 4987805272: TP1 3x @0.10/0.07/0.05 lot, 27 Agu 2026).
+                    entry = getattr(d, "entry", None)
+                    is_out = entry in (getattr(mt5, "DEAL_ENTRY_OUT", 1), getattr(mt5, "DEAL_ENTRY_INOUT", 3)) \
+                        if entry is not None else ("Partial TP" in (getattr(d, "comment", "") or ""))
+                    if is_out:
                         partials += 1
+                        v = getattr(d, "volume", None)
+                        if isinstance(v, (int, float)) and v > 0:
+                            out_volume += float(v)
+                        else:
+                            have_volume = False
             inferred["tp1_hit"] = partials >= 1
             inferred["tp2_hit"] = partials >= 2
             inferred["tp3_hit"] = partials >= 3
 
             total_v = pos.get("volume", 0.01)
-            ratio_done = (0.30 * int(partials >= 1)) + (0.25 * int(partials >= 2)) + (0.25 * int(partials >= 3))
-            denom = max(1e-9, 1.0 - ratio_done)
-            inferred["initial_volume"] = round(total_v / denom, 2) if partials else total_v
+            if partials and have_volume and out_volume > 0:
+                # eksak: volume awal = sisa + seluruh volume yang sudah ditutup
+                inferred["initial_volume"] = round(total_v + out_volume, 2)
+            else:
+                ratio_done = (0.30 * int(partials >= 1)) + (0.25 * int(partials >= 2)) + (0.25 * int(partials >= 3))
+                denom = max(1e-9, 1.0 - ratio_done)
+                inferred["initial_volume"] = round(total_v / denom, 2) if partials else total_v
 
             sl_dist = (pos.get("sl", 0.0) - pos.get("price_open", 0.0))
             if pos.get("type") == "SELL":
@@ -667,6 +863,9 @@ class IcasMT5Bridge:
             return False
 
         tick = self.get_current_tick()
+        if tick is None:
+            logger.warning(f"Partial close ditunda (ticket {ticket}): tidak ada tick valid dari MT5.")
+            return False
         close_type = mt5.ORDER_TYPE_SELL if p.type == mt5.POSITION_TYPE_BUY else mt5.ORDER_TYPE_BUY
         price = tick["bid"] if p.type == mt5.POSITION_TYPE_BUY else tick["ask"]
         fill_mode = self.get_filling_mode()

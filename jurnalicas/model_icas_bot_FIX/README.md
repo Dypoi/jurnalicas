@@ -8,6 +8,16 @@ Aturan risiko ketat: **1 Signal 1 Position (Zero Martingale, Zero Grid, Zero Lay
 > ⚠️ **Versi ini adalah hasil Audit Forensik 25 Agu 2026** — 14 bug diperbaiki
 > (lihat `LAPORAN_AUDIT_FORENSIK.md`), termasuk root cause error `10016 Invalid stops`.
 > **Baca bagian "Hasil Backtest & Kejujuran Statistik" sebelum memakai uang sungguhan.**
+>
+> 🔴 **UPDATE AUDIT 2 Sep 2026 (engine v2-d) — WAJIB BACA `LAPORAN_AUDIT_FORENSIK.md` §13:**
+> 1. **Lookahead bias** ditemukan di perhitungan level sesi Asia/London (backtest & grid-search
+>    "mengintip" range yang belum terjadi). Setelah dibuat kausal, **PF kalibrasi 2,08 → 1,01** —
+>    edge SWING-150 **belum terbukti**. Forward live 7 hari Anda (PF 0,78) konsisten dengan itu.
+> 2. Daemon kini **tahan koneksi putus**: health-check + reconnect otomatis, tick `None` tidak lagi
+>    dibaca sebagai harga 0 (dulu memicu TP palsu +42.975 pips), mutex *fail-closed*, SL
+>    **never-loosen**, state disimpan segera setelah partial close, exception tidak mematikan daemon.
+> 3. Jam server dikoreksi (Exness = UTC+0 → `SERVER_TIME_OFFSET_HOURS = 7`).
+> Verifikasi: `python verify_disconnect_resilience.py` (44/44) dan `python verify_daemon_disconnect_e2e.py` (13/13).
 
 ---
 
@@ -49,11 +59,16 @@ python icasbot --dashboard
 
 ### Verifikasi kesehatan kode (jalankan kapan pun)
 ```bash
-python verify_fix_10016.py          # regresi bug 10016 (mock MT5)      -> 5/5 PASS
-python verify_state_persistence.py  # persistensi & rebuild state       -> 14/14 PASS
-python verify_engine_parity.py      # parity bitwise engine baru vs lama-> 4/4 PASS
-python test_icas_audit.py           # unit test inti                    -> 7/7 OK
-python test_be_15_pips.py           # unit test BE+                     -> 2/2 OK
+python verify_fix_10016.py             # regresi bug 10016 + never-loosen (mock MT5) -> 6/6 PASS
+python verify_state_persistence.py     # persistensi & rebuild state                 -> 14/14 PASS
+python verify_disconnect_resilience.py # koneksi putus, tick None, mutex, SL, kausal -> 44/44 PASS
+python verify_daemon_disconnect_e2e.py # daemon nyata vs MT5 putus di tengah posisi  -> 13/13 PASS
+python verify_dashboard_v2.py          # dashboard (Flask test client)               -> 21/21 PASS
+python test_icas_audit.py              # unit test inti                              -> 7/7 OK
+python test_be_15_pips.py              # unit test BE+                               -> 2/2 OK
+python research/audit_signal_parity.py # PF lookahead vs kausal vs emulasi live (~6 mnt)
+# verify_engine_parity.py merujuk path absolut di luar repo (tidak dapat dijalankan);
+# reproduksi angka lama: set SESSION_LEVELS_LOOKAHEAD=True + --legacy.
 ```
 
 ---

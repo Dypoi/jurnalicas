@@ -17,8 +17,18 @@ from config import config
 from src.execution.mt5_bridge import IcasMT5Bridge
 from src.execution.trade_journal import TradeJournal
 from src.strategy.icas_strategy import ModelIcasStrategy
-from src.indicators.sessions import calculate_session_killzones, is_current_in_burst
+# [AUDIT FIX LA-01] Level sesi KAUSAL (tanpa lookahead) — definisi yang sama
+# dipakai backtest & live; window 150 bar tidak lagi menghasilkan level degenerate.
+from src.indicators.sessions import calculate_session_levels_causal, is_current_in_burst
 from src.state_store import StateStore
+
+# [AUDIT FIX DC-01] Parameter ketahanan koneksi (bisa dioverride di config.py)
+RECONNECT_BACKOFF_SECONDS = getattr(config, "RECONNECT_BACKOFF_SECONDS", (5, 10, 20, 30, 60))
+DISCONNECT_LOG_EVERY_SECONDS = 60
+# [AUDIT FIX LA-01] Window scan: 150 bar (12,5 jam) DULU membuat level Asia/London
+# "kemarin" hilang sebelum jam 03:00 server -> level degenerate. 600 bar M5 (~2 hari
+# trading) menjamin selalu ada sesi Asia & London lengkap dari hari sebelumnya.
+SCAN_BARS = int(getattr(config, "LIVE_SCAN_BARS", 600))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,7 +51,8 @@ def _journal_close(journal: TradeJournal, bridge: IcasMT5Bridge, ticket, context
             info = None
         if info:
             break
-        time.sleep(0.7)
+        if _att < 2:
+            time.sleep(0.7)   # total blokir maks 1,4 s (bukan 2,1 s); loop utama tetap responsif
     payload = {"ticket": ticket, "context": context}
     if info:
         payload.update(info)
@@ -117,15 +128,28 @@ def main():
 
     # (a) Rekonsiliasi tiket yg tertutup SAAT daemon OFF: masih ada di state store,
     #     tapi broker bilang sudah tidak terbuka -> jurnal + bersihkan state.
+    open_pos_now = None   # [AUDIT FIX ST-01] wajib terdefinisi walau blok try gagal (UnboundLocalError)
     try:
         open_pos_now = bridge.get_open_position_details()
         open_ticket_now = str(open_pos_now["ticket"]) if open_pos_now else None
-        for t in state_store.list_position_tickets():
-            if open_ticket_now is not None and str(t) == open_ticket_now:
-                continue  # masih terbuka -> akan diadopsi di loop
-            logger.info(f"🔎 Rekonsiliasi: tiket {t} tidak lagi terbuka -> anggap tertutup saat daemon OFF")
-            _journal_close(journal, bridge, t, context="offline")
-            state_store.clear_position(t)
+        # [AUDIT FIX DC-03] Jika positions_get None (IPC), JANGAN simpulkan tiket
+        # di state sudah tertutup — biarkan loop utama merekonsiliasi saat koneksi sehat.
+        if open_pos_now is None and not bridge.positions_query_ok:
+            logger.warning("Rekonsiliasi startup ditunda: status posisi belum bisa dibaca dari MT5.")
+        else:
+            for t in state_store.list_position_tickets():
+                if open_ticket_now is not None and str(t) == open_ticket_now:
+                    continue  # masih terbuka -> akan diadopsi di loop
+                # Konfirmasi kedua per tiket (True/False pasti; None = tunda)
+                st = bridge.is_ticket_open(t)
+                if st is None:
+                    logger.warning(f"Rekonsiliasi tiket {t} ditunda: MT5 tidak menjawab pasti.")
+                    continue
+                if st is True:
+                    continue
+                logger.info(f"🔎 Rekonsiliasi: tiket {t} tidak lagi terbuka -> anggap tertutup saat daemon OFF")
+                _journal_close(journal, bridge, t, context="offline")
+                state_store.clear_position(t)
     except Exception as e:
         logger.warning(f"Rekonsiliasi startup gagal (tidak fatal): {e}")
 
@@ -149,8 +173,48 @@ def main():
     eq_snap_secs = int(getattr(config, "JOURNAL_EQUITY_SNAPSHOT_SECONDS", 900))
     logger.info(f"• Jurnal JSON       : {journal.path} ('{'AKTIF' if journal.enabled else 'NONAKTIF'}', equity tiap {eq_snap_secs//60} menit)")
 
+    # [AUDIT FIX DC-01] Status koneksi & backoff reconnect
+    disconnected_since = None        # epoch saat koneksi pertama terdeteksi putus
+    disconnect_attempts = 0
+    last_disconnect_log = 0.0
+    consecutive_cycle_errors = 0
+
+    def _handle_disconnect(reason: str):
+        """Tandai koneksi putus, catat jurnal SEKALI, coba reconnect dgn backoff.
+        Return True bila koneksi pulih pada percobaan ini."""
+        nonlocal disconnected_since, disconnect_attempts, last_disconnect_log, last_scanned_bar_time
+        now = time.time()
+        if disconnected_since is None:
+            disconnected_since = now
+            disconnect_attempts = 0
+            journal.log("mt5_disconnected", reason=reason, open_ticket=last_position_ticket)
+            logger.error(f"🔌 KONEKSI MT5 BERMASALAH ({reason}). Manajemen posisi & scan sinyal DIHENTIKAN sementara; "
+                         f"SL tetap aktif di server broker. Mencoba reconnect...")
+        backoff = RECONNECT_BACKOFF_SECONDS[min(disconnect_attempts, len(RECONNECT_BACKOFF_SECONDS) - 1)]
+        if now - last_disconnect_log >= DISCONNECT_LOG_EVERY_SECONDS:
+            last_disconnect_log = now
+            logger.warning(f"🔌 Masih terputus {int((now - disconnected_since) / 60)} menit "
+                           f"(percobaan {disconnect_attempts + 1}, backoff {backoff}s)...")
+        disconnect_attempts += 1
+        ok = bridge.reconnect(max_attempts=1)
+        if ok:
+            down_s = round(now - disconnected_since, 1)
+            journal.log("mt5_reconnected", downtime_seconds=down_s, attempts=disconnect_attempts,
+                        open_ticket=last_position_ticket)
+            logger.info(f"✅ Koneksi MT5 pulih setelah {down_s}s ({disconnect_attempts} percobaan). "
+                        f"State posisi akan di-merge ulang dari file/deals.")
+            disconnected_since = None
+            disconnect_attempts = 0
+            # Bar yang lewat selama putus TIDAK boleh dieksekusi terlambat: paksa
+            # scan berikutnya menunggu bar M5 baru yang benar-benar segar.
+            last_scanned_bar_time = "__RESYNC__"
+            return True
+        time.sleep(backoff)
+        return False
+
     try:
         while True:
+          try:   # [AUDIT FIX DC-01] Satu siklus gagal TIDAK boleh membunuh daemon
             now_time = time.time()
             now_dt = datetime.datetime.now()
             _prev_daily_count = strategy.daily_trades_count  # [AUDIT FIX LIVE-01] rollover harus baca SEBELUM reset
@@ -161,10 +225,27 @@ def main():
                             signals_yesterday=_prev_daily_count)
                 last_day_str = today_str
 
+            # ---------------- [AUDIT FIX DC-01] HEALTH CHECK KONEKSI ----------------
+            # Sebelum menyentuh posisi apa pun: terminal hidup? terhubung ke broker?
+            # ada tick valid? Jika tidak -> reconnect dgn backoff, lewati siklus.
+            if not bridge.is_terminal_connected():
+                _handle_disconnect("terminal_info None / terminal offline")
+                continue
+            tick = bridge.get_current_tick()
+            if tick is None:
+                _handle_disconnect("symbol_info_tick None (tidak ada harga)")
+                continue
+            if disconnected_since is not None:
+                # koneksi pulih sendiri tanpa reconnect eksplisit
+                journal.log("mt5_reconnected", downtime_seconds=round(now_time - disconnected_since, 1),
+                            attempts=disconnect_attempts, open_ticket=last_position_ticket)
+                disconnected_since = None
+                disconnect_attempts = 0
+                last_scanned_bar_time = "__RESYNC__"
+
             # Periodic Heartbeat Log every 60 seconds
             if now_time - last_heartbeat_time >= 60:
                 last_heartbeat_time = now_time
-                tick = bridge.get_current_tick()
                 has_pos = bridge.has_open_positions()
                 logger.info(f"[HEARTBEAT] Sesi: {kz_status_str} | Bid: {tick['bid']:.2f} | Spread: {tick['spread']:.1f} pts | Sinyal Hari Ini: {strategy.daily_trades_count} | Posisi Aktif: {1 if has_pos else 0}")
 
@@ -172,16 +253,23 @@ def main():
             if now_time - last_equity_snap_time >= eq_snap_secs:
                 last_equity_snap_time = now_time
                 try:
+                    _acc = bridge.get_account_details()
+                    _p = bridge.get_open_position_details()
                     journal.log("equity_snapshot",
-                                balance=bridge.get_account_balance(),
+                                balance=_acc.get("balance"),
                                 equity=bridge.get_account_equity(),
-                                floating_pnl=(pos["profit"] if (pos := bridge.get_open_position_details()) else 0.0),
-                                daily_signals=strategy.daily_trades_count)
+                                floating_pnl=(_p["profit"] if _p else 0.0),
+                                daily_signals=strategy.daily_trades_count,
+                                connected=bool(_acc.get("connected", True)))
                 except Exception:
                     pass
 
             # 1. Manage Active Position
             pos = bridge.get_open_position_details()
+            if pos is None and not bridge.positions_query_ok:
+                # [AUDIT FIX DC-03] positions_get None = TIDAK DIKETAHUI, bukan "kosong".
+                _handle_disconnect("positions_get None (IPC)")
+                continue
             if pos is not None:
                 pending_misses.pop(pos["ticket"], None)   # [AUDIT FIX LIVE-01] posisi terlihat sehat
                 last_position_ticket = pos["ticket"]
@@ -230,10 +318,22 @@ def main():
                                 journal.log("position_readopted", ticket=pos["ticket"], source="mt5_deals",
                                             tp1_hit=pos.get("tp1_hit"), trail_step=pos.get("trail_step"))
 
-                tick = bridge.get_current_tick()
+                # Tick segar tepat sebelum keputusan manajemen (bukan tick awal siklus)
+                _t2 = bridge.get_current_tick()
+                if _t2 is None:
+                    _handle_disconnect("symbol_info_tick None saat manajemen posisi")
+                    continue
+                tick = _t2
                 cur_price = tick["bid"] if pos["type"] == "BUY" else tick["ask"]
                 ep = pos["price_open"]
                 sp_val = tick["spread"]
+                # [AUDIT FIX DC-02] Sanity harga: tick yang menyimpang > $200 dari
+                # entry adalah data rusak (bid=0 dulu menghasilkan fav 46.000 pips).
+                if cur_price <= 0.0 or abs(cur_price - ep) > 200.0:
+                    logger.error(f"⛔ Tick tidak masuk akal (harga {cur_price} vs entry {ep}) — siklus dilewati.")
+                    journal.log("tick_rejected", ticket=pos["ticket"], price=cur_price, entry=ep)
+                    time.sleep(config.POLL_INTERVAL_SECONDS)
+                    continue
 
                 # ================================================================
                 # [FIXED - ROOT CAUSE 10016] Profit-lock offset untuk Early BE+.
@@ -257,6 +357,28 @@ def main():
                         return (tick["bid"] - sl_price) >= min_gap
                     return (sl_price - tick["ask"]) >= min_gap
 
+                def sl_is_improvement(sl_price: float) -> bool:
+                    """[AUDIT FIX SL-01] True hanya bila SL baru LEBIH KETAT dari SL
+                    yang kini terpasang di broker (never-loosen). Sumber kebenaran =
+                    pos['sl'] yang di-refresh dari MT5 tiap siklus."""
+                    cur_sl = float(pos.get("sl") or 0.0)
+                    if cur_sl <= 0.0:
+                        return True
+                    if pos["type"] == "BUY":
+                        return sl_price > cur_sl + 1e-9
+                    return sl_price < cur_sl - 1e-9
+
+                def try_raise_sl(sl_price: float) -> bool:
+                    """Kirim modifikasi SL hanya jika sah (clearance) DAN memperketat."""
+                    if not sl_is_improvement(sl_price):
+                        return False
+                    if not sl_clearance_ok(sl_price):
+                        return False
+                    ok = bridge.modify_sl(pos["ticket"], sl_price)
+                    if ok:
+                        pos["sl"] = sl_price
+                    return ok
+
                 # Calculate favorable excursion
                 fav_usd = (cur_price - ep) if pos["type"] == "BUY" else (ep - cur_price)
                 if fav_usd > pos.get("max_fav", 0.0):
@@ -267,7 +389,9 @@ def main():
                 # 1A. Early BE+ Check (NONAKTIF pada engine v2: trigger 9999)
                 if not pos.get("be_set", False) and fav_pips >= config.EARLY_BE_TRIGGER_PIPS:
                     new_sl = ep + be_offset if pos["type"] == "BUY" else ep - be_offset
-                    if sl_clearance_ok(new_sl) and bridge.modify_sl(pos["ticket"], new_sl):
+                    if not sl_is_improvement(new_sl):
+                        pos["be_set"] = True   # SL broker sudah lebih ketat dari BE -> anggap terkunci
+                    elif try_raise_sl(new_sl):
                         pos["be_set"] = True
                         logger.info(f"🛡️ Early BE+ Aktif pada Ticket {pos['ticket']}! SL dikunci di {new_sl:.2f} (Guaranteed Profit)")
                         journal.log("be_lock", ticket=pos["ticket"], trigger="early_be",
@@ -280,11 +404,20 @@ def main():
                     close_vol = round(pos["initial_volume"] * config.TP1_LOT_RATIO, 2)
                     if close_vol >= 0.01 and bridge.close_partial(pos["ticket"], close_vol):
                         pos["tp1_hit"] = True
+                        # [AUDIT FIX ST-02] Persist SEGERA setelah partial close (bukan
+                        # di akhir siklus): crash/kill di antara keduanya = TP1 ganda.
+                        state_store.save_position(pos)
                         logger.info(f"🎯 TP1 Hit (1.25xSL / +{config.TP1_PIPS:.0f} pips)! Closed {close_vol} lots ({config.TP1_LOT_RATIO*100:.0f}%) pada Ticket {pos['ticket']}")
                         journal.log("tp_hit", ticket=pos["ticket"], level=1, close_vol=close_vol,
                                     fav_pips=round(fav_pips, 1), remaining_vol=round(pos["initial_volume"] - close_vol, 2))
+                        # [AUDIT FIX SL-01] BE-lock pasca TP1 hanya bila MEMPERKETAT SL.
+                        # Dulu: SL yang sudah di-trail ke +30/+130/+230 pips DITURUNKAN
+                        # kembali ke entry+offset (9 insiden di jurnal 27-31 Agu 2026).
                         new_sl = ep + be_offset if pos["type"] == "BUY" else ep - be_offset
-                        if sl_clearance_ok(new_sl) and bridge.modify_sl(pos["ticket"], new_sl):
+                        if not sl_is_improvement(new_sl):
+                            pos["be_set"] = True
+                            logger.info(f"🛡️ BE pasca-TP1 dilewati: SL broker {pos.get('sl'):.3f} sudah lebih ketat dari {new_sl:.3f} (never-loosen).")
+                        elif try_raise_sl(new_sl):
                             pos["be_set"] = True
                             journal.log("be_lock", ticket=pos["ticket"], trigger="post_tp1",
                                         new_sl=round(new_sl, 4))
@@ -294,6 +427,7 @@ def main():
                     close_vol = round(pos["initial_volume"] * config.TP2_LOT_RATIO, 2)
                     if close_vol >= 0.01 and bridge.close_partial(pos["ticket"], close_vol):
                         pos["tp2_hit"] = True
+                        state_store.save_position(pos)   # [AUDIT FIX ST-02]
                         logger.info(f"🎯 TP2 Hit (2.5xSL / +{config.TP2_PIPS:.0f} pips)! Closed {close_vol} lots ({config.TP2_LOT_RATIO*100:.0f}%) pada Ticket {pos['ticket']}")
                         journal.log("tp_hit", ticket=pos["ticket"], level=2, close_vol=close_vol,
                                     fav_pips=round(fav_pips, 1))
@@ -303,22 +437,30 @@ def main():
                     close_vol = round(pos["initial_volume"] * config.TP3_LOT_RATIO, 2)
                     if close_vol >= 0.01 and bridge.close_partial(pos["ticket"], close_vol):
                         pos["tp3_hit"] = True
+                        state_store.save_position(pos)   # [AUDIT FIX ST-02]
                         logger.info(f"🎯 TP3 Hit (3.75xSL / +{config.TP3_PIPS:.0f} pips)! Closed {close_vol} lots ({config.TP3_LOT_RATIO*100:.0f}%) pada Ticket {pos['ticket']}")
-                        # Step SL to TP1
+                        # Step SL to TP1 (hanya bila memperketat — trailing bisa sudah lebih tinggi)
                         tp1_price = ep + (config.TP1_PIPS * 0.10) if pos["type"] == "BUY" else ep - (config.TP1_PIPS * 0.10)
-                        if sl_clearance_ok(tp1_price) and bridge.modify_sl(pos["ticket"], tp1_price):
+                        _moved = False
+                        if not sl_is_improvement(tp1_price):
+                            pos["be_set"] = True
+                        elif try_raise_sl(tp1_price):
+                            _moved = True
                             logger.info(f"🚀 SL Runner Otomatis Dinaikkan ke Level TP1: {tp1_price:.2f} (+{config.TP1_PIPS:.0f} pips Locked)!")
                             journal.log("sl_step_to_tp1", ticket=pos["ticket"], new_sl=round(tp1_price, 4))
                             pos["be_set"] = True
                         journal.log("tp_hit", ticket=pos["ticket"], level=3, close_vol=close_vol,
-                                    fav_pips=round(fav_pips, 1), sl_moved_to_tp1=pos["be_set"])
+                                    fav_pips=round(fav_pips, 1), sl_moved_to_tp1=_moved)
 
                 # 1E. Trailing Step for Runner beyond TP3 (Every 100 pips -> Lock 30 pips)
                 k_step = int(fav_pips // config.TRAILING_STEP_PIPS)
                 if k_step >= 1 and k_step > pos.get("trail_step", 0):
                     lock_dist = (k_step - 1) * (config.TRAILING_STEP_PIPS * 0.10) + (config.TRAILING_LOCK_PIPS * 0.10)
                     new_sl = ep + lock_dist if pos["type"] == "BUY" else ep - lock_dist
-                    if sl_clearance_ok(new_sl) and bridge.modify_sl(pos["ticket"], new_sl):
+                    if not sl_is_improvement(new_sl):
+                        # SL broker sudah >= level trailing ini -> catat step tanpa modifikasi
+                        pos["trail_step"] = k_step
+                    elif try_raise_sl(new_sl):
                         pos["trail_step"] = k_step
                         logger.info(f"🚀 Trailing Runner Step {k_step} Aktif! SL dinaikkan ke {new_sl:.2f} (Lock profit +{lock_dist*10:.0f} pips)")
                         journal.log("trail_update", ticket=pos["ticket"], step=k_step,
@@ -356,17 +498,42 @@ def main():
 
                 # 2. Scan Market for New Entry Signals (or Re-Entry)
                 can_trade, reason = strategy.can_trade_today()
+                # [AUDIT FIX DC-03] Jangan scan/entry bila tiket lama masih menunggu
+                # konfirmasi tutup (miss 1..4): mutex logis, mencegah 2 posisi.
+                if can_trade and last_position_ticket is not None:
+                    can_trade = False
                 if can_trade:
-                    df_m5_raw = bridge.get_latest_m5_candles(count=150)
+                    df_m5_raw = bridge.get_latest_m5_candles(count=SCAN_BARS)
                     if not df_m5_raw.empty and len(df_m5_raw) >= 15:
-                        df_m5 = calculate_session_killzones(df_m5_raw)
+                        # [AUDIT FIX LA-01] level sesi kausal (identik dgn backtest terkoreksi)
+                        df_m5 = calculate_session_levels_causal(df_m5_raw)
                         latest_bar_idx = len(df_m5) - 2 # Latest completed candle
                         latest_time = df_m5['time'].iloc[latest_bar_idx]
 
-                        if latest_time != last_scanned_bar_time:
+                        # [AUDIT FIX DC-04] Bar basi: bar "selesai" terakhir harus berumur
+                        # < 2 bar M5 (10 menit) relatif waktu server (dari tick.time).
+                        # Setelah reconnect (__RESYNC__) bar pertama yang dilihat DILEWATI
+                        # agar sinyal yang terlambat >5 menit tidak dieksekusi.
+                        # tick.time MT5 = epoch dalam zona waktu SERVER; copy_rates 'time' juga
+                        # server-time (pd.to_datetime unit='s' tanpa tz) -> bandingkan apple-to-apple
+                        # via UTC-naive (bukan utcfromtimestamp yang deprecated di py3.12).
+                        _srv_now = (datetime.datetime.fromtimestamp(int(tick["time"]), datetime.timezone.utc)
+                                    .replace(tzinfo=None)) if tick.get("time") else None
+                        _bar_age_s = (_srv_now - latest_time.to_pydatetime()).total_seconds() if _srv_now else 0.0
+                        _stale = _bar_age_s > 2 * 300 + 60
+                        if last_scanned_bar_time == "__RESYNC__":
+                            last_scanned_bar_time = latest_time
+                            logger.info(f"🔄 Resync pasca-koneksi: bar {latest_time} dilewati, menunggu bar M5 baru.")
+                        elif _stale:
+                            if now_time - last_heartbeat_time < 1.0:   # log sekali per heartbeat
+                                logger.warning(f"⚠️ Feed M5 BASI: bar terakhir {latest_time} berumur {_bar_age_s/60:.1f} menit — scan dilewati.")
+                        elif latest_time != last_scanned_bar_time:
                             last_scanned_bar_time = latest_time
                             balance = bridge.get_account_balance()
                             spread_now = bridge.get_current_tick()
+                            if balance is None or spread_now is None:
+                                _handle_disconnect("balance/tick None saat scan sinyal")
+                                continue
                             spread_usd_now = spread_now.get("spread", 0.0) * price_point
                             sig = strategy.evaluate_m5_setup(df_m5, latest_bar_idx, balance,
                                                              spread_usd=spread_usd_now)
@@ -400,7 +567,23 @@ def main():
                 logger.warning(f"⚠️ LOOP STALL {(_cycle_now - last_cycle_end)/60.0:.1f} menit — TP tier & trailing tidak berjalan selama jeda ini (SL tetap aman di broker).")
                 journal.log("loop_stall_warning", gap_seconds=round(_cycle_now - last_cycle_end, 1))
             last_cycle_end = _cycle_now
+            consecutive_cycle_errors = 0
             time.sleep(config.POLL_INTERVAL_SECONDS)
+          except KeyboardInterrupt:
+            raise
+          except Exception as e:
+            # [AUDIT FIX DC-01] Exception per-siklus (IPC error, KeyError dari
+            # struct MT5 yang None, dsb.) TIDAK mematikan daemon. Dulu: raise ->
+            # engine_stop -> posisi ditinggal tanpa manajemen TP/trailing.
+            consecutive_cycle_errors += 1
+            journal.log("cycle_error", error=f"{type(e).__name__}: {e}",
+                        consecutive=consecutive_cycle_errors, open_ticket=last_position_ticket)
+            logger.exception(f"⚠️ Siklus gagal ({consecutive_cycle_errors} beruntun) — daemon tetap hidup: {e}")
+            if consecutive_cycle_errors >= 3:
+                # kemungkinan besar koneksi: paksa jalur reconnect
+                _handle_disconnect(f"{consecutive_cycle_errors} exception beruntun: {type(e).__name__}")
+            else:
+                time.sleep(config.POLL_INTERVAL_SECONDS)
     except KeyboardInterrupt:
         journal.log("engine_stop", reason="keyboard_interrupt", open_ticket=last_position_ticket)
         logger.info("\nBot dihentikan oleh user. State & jurnal aman tersimpan. Sampai jumpa!")

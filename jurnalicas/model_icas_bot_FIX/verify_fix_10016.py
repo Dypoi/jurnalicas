@@ -140,13 +140,20 @@ ok = bridge.modify_sl(4970342345, sl_baru)
 check(f"Setelah Bid naik ke {BID_BARU:.2f}, SL {sl_baru:.2f} berhasil dikunci", ok is True)
 check("SL posisi di server kini = " + f"{mock._pos[0].sl:.2f}", abs(mock._pos[0].sl - sl_baru) < 1e-6)
 
-# Skenario spread normal (26 pts): offset = 0.56 -> langsung sah saat trigger
+# Skenario spread normal (26 pts): offset = 0.56 -> SL 4668.36.
+# [AUDIT FIX SL-01, 2 Sep 2026] SL broker kini 4668.70 (dari langkah sebelumnya);
+# 4668.36 LEBIH RENDAH -> harus DITOLAK (never-loosen), bukan diterima.
 spread_normal = 26.0
 be_offset_normal = min((spread_normal * 0.01) + 0.30,
                        max(0.30, trigger_dist - 0.10))
 sl3 = ep + be_offset_normal
 ok2 = bridge.modify_sl(4970342345, sl3)
-check(f"Spread normal 26 pts: BE+ offset ${be_offset_normal:.2f} langsung diterima", ok2 is True)
+check(f"Spread normal 26 pts: BE+ offset ${be_offset_normal:.2f} (SL {sl3:.2f} < SL broker 4668.70) DITOLAK never-loosen",
+      ok2 is False and abs(mock._pos[0].sl - 4668.70) < 1e-6)
+# Pada posisi BARU (SL awal masih di bawah entry) offset yang sama harus langsung diterima
+mock._pos = [mock._pos[0]._replace(sl=4665.80)]
+ok3 = bridge.modify_sl(4970342345, sl3)
+check(f"Posisi baru (SL awal 4665.80): BE+ offset ${be_offset_normal:.2f} langsung diterima", ok3 is True)
 
 print("\n" + "=" * 78)
 print(f" HASIL: {PASS} PASS / {FAIL} FAIL")

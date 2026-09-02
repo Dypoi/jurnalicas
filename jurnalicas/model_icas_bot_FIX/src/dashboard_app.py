@@ -21,7 +21,7 @@ import datetime
 import json
 import os
 from config import config
-from src.indicators.sessions import calculate_session_killzones, is_current_in_burst
+from src.indicators.sessions import calculate_session_levels_causal, is_current_in_burst
 from src.strategy.icas_strategy import ModelIcasStrategy
 from src.execution.mt5_bridge import IcasMT5Bridge
 from src.backtest.engine import IcasBacktestEngine
@@ -370,11 +370,17 @@ def api_status():
     if not active_sessions: active_sessions.append("Inter-Session Transition")
 
     acc_info = bridge.get_account_details()
+    # [AUDIT FIX DC-02/DC-05] tick None = feed putus -> jangan crash / jangan
+    # menampilkan angka palsu; status koneksi dikirim eksplisit ke UI.
     tick = bridge.get_current_tick()
+    feed_ok = tick is not None
+    if tick is None:
+        tick = {"bid": 0.0, "ask": 0.0, "spread": 0.0, "time": 0}
     pos = bridge.get_open_position_details()
+    mt5_connected = bool(acc_info.get("connected", False)) and feed_ok
 
     pos_data = None
-    if pos is not None:
+    if pos is not None and feed_ok:
         cur_price = tick["bid"] if pos["type"] == "BUY" else tick["ask"]
         ep = pos["price_open"]
         fav_usd = (cur_price - ep) if pos["type"] == "BUY" else (ep - cur_price)
@@ -397,7 +403,9 @@ def api_status():
         }
 
     return jsonify({
-        "status": "RUNNING",
+        "status": "RUNNING" if mt5_connected else "MT5 DISCONNECTED",
+        "mt5_connected": mt5_connected,
+        "feed_ok": feed_ok,
         "engine_version": ENGINE_VERSION,
         "symbol": bridge.resolved_symbol,
         "timeframe": config.TIMEFRAME,
@@ -413,7 +421,8 @@ def api_status():
         # [D-01] digit-aware: spread_usd = points x point simbol (bukan x0.01 tetap)
         "spread_usd": round(tick["spread"] * price_point, 2),
         "price_point": price_point,
-        "spread_status": "NORMAL (Aman) ✅" if tick["spread"] <= config.MAX_SPREAD_POINTS else "TINGGI ⚠️",
+        "spread_status": ("FEED PUTUS ❌" if not feed_ok else
+                          ("NORMAL (Aman) ✅" if tick["spread"] <= config.MAX_SPREAD_POINTS else "TINGGI ⚠️")),
         "account": acc_info,
         "risk_pct": config.RISK_PER_TRADE_PCT * 100,
         "sl_pips": config.STOP_LOSS_PIPS,
@@ -443,11 +452,13 @@ def api_journal():
 
 @app.route('/api/candles')
 def api_candles():
-    df_raw = bridge.get_latest_m5_candles(120)
+    df_raw = bridge.get_latest_m5_candles(int(getattr(config, "LIVE_SCAN_BARS", 600)))
     if df_raw.empty:
         return jsonify([])
-    
-    df = calculate_session_killzones(df_raw)
+
+    # [AUDIT FIX LA-01] level sesi kausal — chart menampilkan level yang SAMA
+    # dengan yang dipakai daemon untuk sinyal (bukan range yang belum terjadi).
+    df = calculate_session_levels_causal(df_raw).tail(120).reset_index(drop=True)
     
     candles = []
     for idx, row in df.iterrows():

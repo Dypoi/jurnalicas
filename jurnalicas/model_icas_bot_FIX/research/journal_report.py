@@ -244,6 +244,51 @@ def main():
         P("Catatan: ada sesi tanpa engine_stop berpasangan (listrik mati / kill paksa) — "
           "tidak apa-apa; rekonsiliasi saat start berikutnya sudah menanganinya.")
 
+    # ---------------- [AUDIT 2 Sep 2026] KESEHATAN KONEKSI & INTEGRITAS ----------------
+    P("\n" + "-" * 96)
+    P(" F. KESEHATAN KONEKSI & INTEGRITAS EKSEKUSI (audit forensik)")
+    P("-" * 96)
+    # (1) snapshot dengan balance palsu (INITIAL_CAPITAL) / equity None = koneksi putus
+    #     tanpa terdeteksi (engine < v2-d). Engine v2-d menulis connected=False eksplisit.
+    fake_snaps = [e for e in events if e.get("event") == "equity_snapshot" and
+                  (e.get("equity") is None or e.get("connected") is False)]
+    if fake_snaps:
+        P(f"⚠️ {len(fake_snaps)} snapshot menunjukkan KONEKSI MT5 PUTUS (equity None / connected=False): "
+          f"{fake_snaps[0].get('ts','')[:16]} .. {fake_snaps[-1].get('ts','')[:16]}")
+    disc = [e for e in events if e.get("event") == "mt5_disconnected"]
+    reco = [e for e in events if e.get("event") == "mt5_reconnected"]
+    if disc or reco:
+        tot_down = sum(float(e.get("downtime_seconds") or 0) for e in reco)
+        P(f"Koneksi putus terdeteksi   : {len(disc)}× | pulih otomatis: {len(reco)}× | total downtime {tot_down/60:.1f} menit")
+    stalls = [e for e in events if e.get("event") == "loop_stall_warning"]
+    if stalls:
+        P(f"Loop stall (>2 mnt)        : {len(stalls)}× | terlama {max(float(e.get('gap_seconds') or 0) for e in stalls)/60:.1f} menit "
+          f"(laptop sleep / MT5 hang — manajemen TP/trailing tidak berjalan selama jeda)")
+    cyc_err = [e for e in events if e.get("event") == "cycle_error"]
+    if cyc_err:
+        P(f"Exception per-siklus       : {len(cyc_err)}× (daemon tetap hidup; lihat 'error' di jurnal)")
+    # (2) integritas: event tp_hit ganda / SL dilonggarkan
+    tp1_by_tk = collections.Counter(str(e.get("ticket")) for e in events
+                                    if e.get("event") == "tp_hit" and e.get("level") == 1)
+    dup_tp1 = {k: v for k, v in tp1_by_tk.items() if v > 1}
+    if dup_tp1:
+        P(f"⛔ TP1 ganda pada tiket    : {dup_tp1} (bug LIVE-01 engine lama; diperbaiki v2-d)")
+    loosen = 0
+    last_sl = {}
+    typ = {str(e.get("ticket")): e.get("type") for e in events if e.get("event") == "order_open"}
+    for e in events:
+        if e.get("event") in ("be_lock", "trail_update", "sl_step_to_tp1"):
+            tk = str(e.get("ticket")); sl = e.get("new_sl")
+            if tk in last_sl and isinstance(sl, (int, float)):
+                if (typ.get(tk) == "BUY" and sl < last_sl[tk]) or (typ.get(tk) == "SELL" and sl > last_sl[tk]):
+                    loosen += 1
+            if isinstance(sl, (int, float)):
+                last_sl[tk] = sl
+    if loosen:
+        P(f"⛔ SL DILONGGARKAN         : {loosen}× (be_lock pasca-TP1 menurunkan SL trailing — bug SL-01; diperbaiki v2-d)")
+    if not (fake_snaps or disc or stalls or dup_tp1 or loosen or cyc_err):
+        P("✅ Tidak ada anomali koneksi/integritas terdeteksi pada jurnal ini.")
+
     if args.last > 0:
         P("\n" + "-" * 96)
         P(f" E. {args.last} EVENT TERAKHIR")

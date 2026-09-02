@@ -1,0 +1,20 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ---- Artefak sementara runtime bot ----
+# Catatan audit 2 Sep 2026: logs/trade_journal.jsonl & state/icas_state.json
+# SENGAJA tetap dilacak git sebagai bukti forensik (referensi nomor baris di
+# LAPORAN_AUDIT_FORENSIK.md §13). Jangan `git rm` — pull di laptop trading akan
+# MENGHAPUS jurnal live Anda. Yang diabaikan hanya file sementara di bawah ini.
+jurnalicas/model_icas_bot_FIX/state/*.tmp
+jurnalicas/model_icas_bot_FIX/logs/*.verify_backup
+jurnalicas/model_icas_bot_FIX/logs/*.log
+jurnalicas/model_icas_bot_FIX/reports/journal_observasi.txt
+
+# ---- Kredensial / env ----
+.env
+*.env

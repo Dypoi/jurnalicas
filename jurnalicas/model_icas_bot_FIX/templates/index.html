@@ -309,6 +309,21 @@
                 document.getElementById('wib-time').innerText = d.wib_time;
                 document.getElementById('server-time').innerText = d.server_time;
                 
+                // [AUDIT FIX DC-05] Badge koneksi broker dinamis (dulu hardcode hijau
+                // "MT5 CONNECTED (OK)" walau koneksi putus 5 jam pada 2 Sep 2026).
+                const brokerBadge = document.getElementById('broker-status-badge');
+                if (brokerBadge) {
+                    if (d.mt5_connected === false) {
+                        brokerBadge.innerText = '● MT5 TERPUTUS ❌' + (d.feed_ok === false ? ' (tanpa tick)' : '');
+                        brokerBadge.className = 'badge badge-red';
+                    } else {
+                        brokerBadge.innerText = '● MT5 CONNECTED (OK)';
+                        brokerBadge.className = 'badge badge-live';
+                    }
+                }
+                const fmtMoney = (v) => (v === null || v === undefined || isNaN(v)) ? '—' :
+                    '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
                 if (d.account) {
                     const a = d.account;
                     document.getElementById('acc-name-val').innerText = a.name;
@@ -322,15 +337,16 @@
 
                     document.getElementById('acc-avatar').innerText = a.name ? a.name.substring(0, 2).toUpperCase() : 'MT';
 
-                    document.getElementById('acc-balance').innerText = '$' + a.balance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                    document.getElementById('acc-equity').innerText = '$' + a.equity.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                    document.getElementById('acc-balance').innerText = fmtMoney(a.balance);
+                    document.getElementById('acc-equity').innerText = fmtMoney(a.equity);
                     
-                    const fPnl = a.floating_pnl || 0.0;
-                    document.getElementById('equity-sub').innerText = 'Floating: ' + (fPnl >= 0 ? '+' : '') + '$' + fPnl.toFixed(2);
-                    document.getElementById('equity-sub').className = 'card-sub ' + (fPnl >= 0 ? 'val-green' : 'val-red');
+                    const fPnl = (a.floating_pnl === null || a.floating_pnl === undefined) ? null : a.floating_pnl;
+                    document.getElementById('equity-sub').innerText = fPnl === null ? 'Floating: —' :
+                        ('Floating: ' + (fPnl >= 0 ? '+' : '') + '$' + fPnl.toFixed(2));
+                    document.getElementById('equity-sub').className = 'card-sub ' + ((fPnl || 0) >= 0 ? 'val-green' : 'val-red');
 
-                    document.getElementById('acc-free-margin').innerText = '$' + a.margin_free.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                    document.getElementById('margin-level-sub').innerText = 'Margin Level: ' + (a.margin_level ? a.margin_level.toFixed(0) : '100') + '%';
+                    document.getElementById('acc-free-margin').innerText = fmtMoney(a.margin_free);
+                    document.getElementById('margin-level-sub').innerText = 'Margin Level: ' + (a.margin_level ? a.margin_level.toFixed(0) : '—') + '%';
                 }
 
                 document.getElementById('session-badge').innerText = d.active_sessions;

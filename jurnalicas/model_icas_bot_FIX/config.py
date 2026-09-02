@@ -62,8 +62,14 @@ class IcasConfig:
     # Session Killzone Filter:
     USE_KILLZONE: bool = False                # False = 24H Full-Market trading
 
-    # ICT Session Hours (Server Time: EET UTC+2/3 | WIB = UTC+7)
-    SERVER_TIME_OFFSET_HOURS: int = 4         # WIB is MT5 Server + 4 hours
+    # ICT Session Hours (Server Time Exness = UTC+0 | WIB = UTC+7)
+    # [AUDIT FIX TZ-01] Dulu 4 (asumsi server UTC+3). Bukti dari ekspor M1 Anda:
+    # pasar buka Minggu 22:01 & tutup Jumat 20:57 waktu server = jam pasar emas
+    # 22:00/21:00 UTC (musim panas AS) -> server = UTC+0. Dikonfirmasi jurnal:
+    # SL tiket 5004701700 tereksekusi 31 Agu 05:01 WIB = Minggu 22:01 UTC
+    # (candle pertama pekan). Dampak lama: jam server di dashboard & killzone
+    # melenceng 3 jam.
+    SERVER_TIME_OFFSET_HOURS: int = 7         # WIB = MT5 Server + 7 jam
     LONDON_BURST_START_SERVER: int = 10
     LONDON_BURST_END_SERVER: int = 12
     NY_BURST_START_HOUR_SERVER: int = 15
@@ -99,10 +105,23 @@ class IcasConfig:
     # ============================================================================
     # [ENGINE BARU v2 "SWING-150" — 25 Agu 2026] Identitas + Jurnal Observasi JSON
     # ============================================================================
-    ENGINE_VERSION: str = "icas-v2-swing150-c (kalibrasi 25 Agu 2026)"
+    ENGINE_VERSION: str = "icas-v2-swing150-d (audit forensik 2 Sep 2026: kausal + resilien)"
     JOURNAL_ENABLED: bool = True              # Jurnal JSONL ke logs/trade_journal.jsonl
     JOURNAL_FILE: str = "logs/trade_journal.jsonl"
     JOURNAL_EQUITY_SNAPSHOT_SECONDS: int = 900  # Telemetri modal tiap 15 menit
+
+    # ============================================================================
+    # [AUDIT FORENSIK 2 Sep 2026] Paritas sinyal & ketahanan koneksi
+    # ============================================================================
+    # LA-01: level sesi (Asian/London high-low) KAUSAL — tanpa lookahead. False =
+    # backtest & live memakai definisi yang sama. True = reproduksi angka lama
+    # (mengintip range sesi yang belum terjadi; PF 2.08 lama -> 1.01 kausal).
+    SESSION_LEVELS_LOOKAHEAD: bool = False
+    # LA-01: jumlah bar M5 yang dimuat daemon untuk scan (600 = ~2 hari trading,
+    # menjamin sesi Asia+London hari sebelumnya selalu ada di window).
+    LIVE_SCAN_BARS: int = 600
+    # DC-01: backoff reconnect MT5 (detik) saat terminal/IPC/feed putus.
+    RECONNECT_BACKOFF_SECONDS: tuple = (5, 10, 20, 30, 60)
     # Killzone tetap NONAKTIF sesuai permintaan pengguna (USE_KILLZONE=False di atas).
     # Anti on/off laptop: state posisi & counter harian dipersist atomik (StateStore),
     # posisi lama diadopsi ulang saat daemon ON, posisi yang tertutup saat OFF

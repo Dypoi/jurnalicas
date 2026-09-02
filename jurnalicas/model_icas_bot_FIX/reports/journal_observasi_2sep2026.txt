@@ -1,0 +1,335 @@
+================================================================================================
+ 📒 JOURNAL REPORT — OBSERVASI ENGINE BARU v2 (SWING-150)
+================================================================================================
+Sumber jurnal : logs/trade_journal.jsonl
+Rentang       : 2026-08-26 22:24:41  ->  2026-09-02 18:47:05  (7 hari kalender, 442 event)
+Event terbanyak: equity_snapshot×299, position_closed×24, signal_detected×21, order_open×21, trail_update×21, tp_hit×11, be_lock×11, position_miss_pending×7
+
+------------------------------------------------------------------------------------------------
+ A. REKAP TRADE (key = tiket posisi)
+------------------------------------------------------------------------------------------------
+Total tiket teramati     : 21  (tertutup & terhitung PnL: 21, masih berjalan/PnL-unknown: 0)
+Posisi diadopsi (on/off) : 1  (via state file: 1, via deal broker: 0)
+
+Profit Factor (realized) : 0.78
+Non-Loss Rate            : 42.9%   (Win>+$1: 9 | Scratch ~0: 0 | Loss: 12)
+Net PnL (realized)       : $-1,306.66
+Ekspektasi/trade         : $-62.22
+Avg Win / Avg Loss       : $+517.51 / $-497.02
+Durasi hold (jam)        : median 1.5 | min 0.0 | maks 50.9
+
+------------------------------------------------------------------------------------------------
+ B. AKTIVITAS & PNL PER HARI
+------------------------------------------------------------------------------------------------
+Tanggal      | Entry | Closed |   PnL Realized | Catatan
+2026-08-26   |     1 |      1 |       $-523.78 | 
+2026-08-27   |     4 |      4 |     $+1,321.06 | 
+2026-08-28   |     8 |      8 |       $-740.40 | frekuensi tinggi (cek sinyal)
+2026-08-29   |     1 |      0 |         $+0.00 | 
+2026-08-31   |     6 |      6 |     $-1,580.99 | 
+2026-09-02   |     1 |      2 |       $+217.45 | 
+
+Rata-rata entry/hari aktif: 3.5 (referensi backtest: 3-5)
+
+------------------------------------------------------------------------------------------------
+ C. KURVA EQUITY (snapshot berkala)
+------------------------------------------------------------------------------------------------
+  2026-08-26T22:39:43  | balance $+10,074.86 | equity $+10,074.86 | floating $+0.00
+  2026-08-26T22:54:44  | balance $+10,074.86 | equity $+10,003.25 | floating $-71.61
+  2026-08-26T23:09:45  | balance $+10,074.86 | equity $+9,984.70 | floating $-90.16
+  2026-08-26T23:24:46  | balance $+10,074.86 | equity $+9,882.34 | floating $-192.52
+  2026-08-26T23:39:47  | balance $+10,074.86 | equity $+9,577.75 | floating $-497.11
+  2026-08-26T23:54:48  | balance $+9,551.08 | equity $+9,551.08 | floating $+0.00
+  2026-08-27T00:09:49  | balance $+9,551.08 | equity $+9,551.08 | floating $+0.00
+  2026-08-27T00:24:50  | balance $+9,551.08 | equity $+9,551.08 | floating $+0.00
+  2026-08-27T00:39:52  | balance $+9,551.08 | equity $+9,521.58 | floating $-29.50
+  2026-08-27T00:54:53  | balance $+9,551.08 | equity $+9,532.07 | floating $-19.01
+  2026-08-27T01:09:53  | balance $+9,551.08 | equity $+9,694.47 | floating $+143.39
+  2026-08-27T01:24:55  | balance $+9,551.08 | equity $+9,414.49 | floating $-136.59
+  2026-08-27T01:39:56  | balance $+9,551.08 | equity $+9,415.55 | floating $-135.53
+  2026-08-27T01:54:57  | balance $+9,551.08 | equity $+9,488.65 | floating $-62.43
+  2026-08-27T02:09:58  | balance $+9,551.08 | equity $+9,377.17 | floating $-173.91
+  2026-08-27T02:24:59  | balance $+9,551.08 | equity $+9,420.57 | floating $-130.51
+  2026-08-27T02:39:59  | balance $+9,551.08 | equity $+9,501.12 | floating $-49.96
+  2026-08-27T02:55:00  | balance $+9,551.08 | equity $+9,407.10 | floating $-143.98
+  2026-08-27T03:10:01  | balance $+9,551.08 | equity $+9,429.21 | floating $-121.87
+  2026-08-27T03:25:02  | balance $+9,551.08 | equity $+9,272.30 | floating $-278.78
+  2026-08-27T03:40:04  | balance $+9,551.08 | equity $+9,368.82 | floating $-182.26
+  2026-08-27T03:55:05  | balance $+9,551.08 | equity $+9,387.40 | floating $-163.68
+  2026-08-27T04:10:06  | balance $+9,551.08 | equity $+9,417.43 | floating $-133.65
+  2026-08-27T04:25:07  | balance $+9,551.08 | equity $+9,417.43 | floating $-133.65
+  2026-08-27T04:40:08  | balance $+9,551.08 | equity $+9,417.43 | floating $-133.65
+  2026-08-27T04:55:09  | balance $+9,551.08 | equity $+9,417.43 | floating $-133.65
+  2026-08-27T05:10:09  | balance $+9,551.08 | equity $+9,741.13 | floating $+190.05
+  2026-08-27T05:25:10  | balance $+9,551.08 | equity $+9,820.56 | floating $+269.48
+  2026-08-27T05:40:11  | balance $+9,551.08 | equity $+9,945.70 | floating $+394.62
+  2026-08-27T05:55:12  | balance $+9,551.08 | equity $+9,855.14 | floating $+304.06
+  2026-08-27T06:10:13  | balance $+9,551.08 | equity $+9,994.11 | floating $+443.03
+  2026-08-27T06:25:14  | balance $+9,745.49 | equity $+10,268.81 | floating $+523.32
+  2026-08-27T06:40:15  | balance $+9,745.49 | equity $+10,307.93 | floating $+562.44
+  2026-08-27T06:55:16  | balance $+9,745.49 | equity $+10,286.27 | floating $+540.78
+  2026-08-27T07:10:16  | balance $+9,745.49 | equity $+10,213.33 | floating $+467.84
+  2026-08-27T07:25:17  | balance $+9,745.49 | equity $+10,259.27 | floating $+513.78
+  2026-08-27T07:40:19  | balance $+10,044.49 | equity $+10,044.49 | floating $+0.00
+  2026-08-27T07:55:20  | balance $+10,044.49 | equity $+10,044.49 | floating $+0.00
+  2026-08-27T08:10:21  | balance $+10,044.49 | equity $+10,094.42 | floating $+49.93
+  2026-08-27T08:25:22  | balance $+10,044.49 | equity $+10,274.33 | floating $+229.84
+  2026-08-27T09:07:43  | balance $+10,044.49 | equity $+10,195.53 | floating $+151.04
+  2026-08-27T09:22:46  | balance $+10,277.77 | equity $+10,785.47 | floating $+507.70
+  2026-08-27T09:37:47  | balance $+10,661.47 | equity $+10,812.64 | floating $+151.17
+  2026-08-27T09:52:48  | balance $+10,661.47 | equity $+10,685.49 | floating $+24.02
+  2026-08-27T10:07:50  | balance $+10,661.47 | equity $+10,569.70 | floating $-91.77
+  2026-08-27T10:22:52  | balance $+10,661.47 | equity $+10,436.34 | floating $-225.13
+  2026-08-27T10:37:53  | balance $+10,661.47 | equity $+10,548.84 | floating $-112.63
+  2026-08-27T10:52:55  | balance $+10,661.47 | equity $+10,773.67 | floating $+112.20
+  2026-08-27T11:07:57  | balance $+10,661.47 | equity $+10,793.67 | floating $+132.20
+  2026-08-27T11:22:58  | balance $+10,661.47 | equity $+10,878.87 | floating $+217.40
+  2026-08-27T11:38:00  | balance $+10,661.47 | equity $+11,012.13 | floating $+350.66
+  2026-08-27T11:53:01  | balance $+10,661.47 | equity $+10,971.34 | floating $+309.87
+  2026-08-27T12:08:03  | balance $+10,661.47 | equity $+11,013.45 | floating $+351.98
+  2026-08-27T12:23:05  | balance $+10,661.47 | equity $+10,990.28 | floating $+328.81
+  2026-08-27T12:38:05  | balance $+10,850.46 | equity $+11,252.16 | floating $+401.70
+  2026-08-27T12:53:06  | balance $+10,850.46 | equity $+11,451.54 | floating $+601.08
+  2026-08-27T13:08:07  | balance $+10,850.46 | equity $+11,468.93 | floating $+618.47
+  2026-08-27T13:23:08  | balance $+10,850.46 | equity $+11,352.39 | floating $+501.93
+  2026-08-27T13:38:10  | balance $+10,850.46 | equity $+11,391.77 | floating $+541.31
+  2026-08-27T13:53:11  | balance $+10,850.46 | equity $+11,429.44 | floating $+578.98
+  2026-08-27T14:08:12  | balance $+10,850.46 | equity $+11,414.28 | floating $+563.82
+  2026-08-27T14:23:13  | balance $+10,850.46 | equity $+11,582.09 | floating $+731.63
+  2026-08-27T14:38:13  | balance $+10,850.46 | equity $+11,624.80 | floating $+774.34
+  2026-08-27T14:53:15  | balance $+11,065.63 | equity $+11,576.11 | floating $+510.48
+  2026-08-27T15:08:16  | balance $+11,065.63 | equity $+11,444.13 | floating $+378.50
+  2026-08-27T15:23:17  | balance $+11,433.63 | equity $+11,262.23 | floating $-171.40
+  2026-08-27T15:38:18  | balance $+11,433.63 | equity $+11,165.64 | floating $-267.99
+  2026-08-27T15:53:19  | balance $+11,433.63 | equity $+11,179.24 | floating $-254.39
+  2026-08-27T16:08:19  | balance $+11,433.63 | equity $+11,031.99 | floating $-401.64
+  2026-08-27T16:23:20  | balance $+11,433.63 | equity $+11,081.16 | floating $-352.47
+  2026-08-27T16:38:21  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T16:57:23  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T17:46:06  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T18:01:08  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T18:16:08  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T18:31:09  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T18:46:09  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T19:01:09  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T19:16:11  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T19:31:12  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T19:46:13  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T20:01:14  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T20:16:15  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T20:31:16  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T20:46:17  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T21:01:18  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T21:16:20  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T21:31:22  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T21:46:23  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T22:01:24  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T22:16:25  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T22:31:26  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T22:46:27  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T23:01:28  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T23:16:29  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T23:31:30  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-27T23:46:31  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-28T00:01:32  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-28T00:16:33  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-28T00:31:34  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-28T00:46:35  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-28T01:01:36  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-28T01:16:37  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-28T01:31:38  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-28T01:46:39  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-28T02:01:40  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-28T02:16:41  | balance $+10,872.14 | equity $+10,872.14 | floating $+0.00
+  2026-08-28T02:31:43  | balance $+10,872.14 | equity $+10,924.34 | floating $+52.20
+  2026-08-28T02:46:44  | balance $+10,872.14 | equity $+10,758.09 | floating $-114.05
+  2026-08-28T03:01:45  | balance $+10,872.14 | equity $+10,871.81 | floating $-0.33
+  2026-08-28T03:16:46  | balance $+10,872.14 | equity $+10,936.52 | floating $+64.38
+  2026-08-28T03:31:46  | balance $+10,872.14 | equity $+10,997.64 | floating $+125.50
+  2026-08-28T03:46:47  | balance $+10,872.14 | equity $+11,001.40 | floating $+129.26
+  2026-08-28T04:01:48  | balance $+10,872.14 | equity $+11,077.69 | floating $+205.55
+  2026-08-28T04:16:49  | balance $+10,872.14 | equity $+11,077.69 | floating $+205.55
+  2026-08-28T04:31:50  | balance $+10,872.14 | equity $+11,077.69 | floating $+205.55
+  2026-08-28T04:46:51  | balance $+10,872.14 | equity $+11,077.69 | floating $+205.55
+  2026-08-28T05:01:51  | balance $+10,872.14 | equity $+10,891.01 | floating $+18.87
+  2026-08-28T05:16:52  | balance $+10,872.14 | equity $+10,947.77 | floating $+75.63
+  2026-08-28T05:31:53  | balance $+10,872.14 | equity $+10,844.52 | floating $-27.62
+  2026-08-28T05:46:54  | balance $+10,872.14 | equity $+10,852.73 | floating $-19.41
+  2026-08-28T06:01:55  | balance $+10,872.14 | equity $+10,800.56 | floating $-71.58
+  2026-08-28T06:16:56  | balance $+10,872.14 | equity $+10,997.50 | floating $+125.36
+  2026-08-28T06:31:57  | balance $+10,872.14 | equity $+11,084.99 | floating $+212.85
+  2026-08-28T06:46:57  | balance $+10,872.14 | equity $+11,148.41 | floating $+276.27
+  2026-08-28T07:01:58  | balance $+10,872.14 | equity $+11,191.78 | floating $+319.64
+  2026-08-28T07:16:59  | balance $+10,872.14 | equity $+11,217.02 | floating $+344.88
+  2026-08-28T07:32:00  | balance $+10,872.14 | equity $+11,401.59 | floating $+529.45
+  2026-08-28T07:47:02  | balance $+11,061.27 | equity $+11,493.46 | floating $+432.19
+  2026-08-28T08:02:03  | balance $+11,061.27 | equity $+11,473.20 | floating $+411.93
+  2026-08-28T08:17:04  | balance $+11,360.27 | equity $+11,309.58 | floating $-50.69
+  2026-08-28T08:32:05  | balance $+11,360.27 | equity $+11,061.62 | floating $-298.65
+  2026-08-28T08:47:06  | balance $+10,855.77 | equity $+10,813.24 | floating $-42.53
+  2026-08-28T09:02:07  | balance $+10,855.77 | equity $+10,959.03 | floating $+103.26
+  2026-08-28T09:17:08  | balance $+10,855.77 | equity $+10,834.22 | floating $-21.55
+  2026-08-28T09:32:08  | balance $+10,855.77 | equity $+10,669.95 | floating $-185.82
+  2026-08-28T09:47:09  | balance $+10,855.77 | equity $+10,695.82 | floating $-159.95
+  2026-08-28T10:02:11  | balance $+10,855.77 | equity $+10,612.07 | floating $-243.70
+  2026-08-28T10:38:24  | balance $+10,855.77 | equity $+10,627.41 | floating $-228.36
+  2026-08-28T10:53:26  | balance $+10,855.77 | equity $+10,830.00 | floating $-25.77
+  2026-08-28T11:08:28  | balance $+10,855.77 | equity $+10,883.63 | floating $+27.86
+  2026-08-28T11:23:28  | balance $+10,855.77 | equity $+10,724.14 | floating $-131.63
+  2026-08-28T11:38:30  | balance $+10,855.77 | equity $+10,838.12 | floating $-17.65
+  2026-08-28T11:53:32  | balance $+10,855.77 | equity $+10,769.38 | floating $-86.39
+  2026-08-28T12:08:33  | balance $+10,855.77 | equity $+10,811.95 | floating $-43.82
+  2026-08-28T12:23:35  | balance $+10,855.77 | equity $+10,705.95 | floating $-149.82
+  2026-08-28T12:38:37  | balance $+10,855.77 | equity $+10,932.40 | floating $+76.63
+  2026-08-28T12:53:38  | balance $+10,855.77 | equity $+10,991.93 | floating $+136.16
+  2026-08-28T13:08:39  | balance $+10,855.77 | equity $+10,860.56 | floating $+4.79
+  2026-08-28T13:23:40  | balance $+10,855.77 | equity $+10,685.76 | floating $-170.01
+  2026-08-28T13:38:40  | balance $+10,855.77 | equity $+10,633.35 | floating $-222.42
+  2026-08-28T13:53:41  | balance $+10,307.48 | equity $+10,307.48 | floating $+0.00
+  2026-08-28T14:08:43  | balance $+10,307.48 | equity $+10,307.48 | floating $+0.00
+  2026-08-28T14:23:45  | balance $+10,307.48 | equity $+10,024.60 | floating $-282.88
+  2026-08-28T14:38:46  | balance $+10,307.48 | equity $+9,953.59 | floating $-353.89
+  2026-08-28T14:53:47  | balance $+10,307.48 | equity $+9,931.97 | floating $-375.51
+  2026-08-28T15:08:48  | balance $+10,307.48 | equity $+9,978.60 | floating $-328.88
+  2026-08-28T15:23:48  | balance $+10,307.48 | equity $+10,000.68 | floating $-306.80
+  2026-08-28T15:38:49  | balance $+10,307.48 | equity $+10,071.13 | floating $-236.35
+  2026-08-28T15:53:50  | balance $+10,307.48 | equity $+10,153.63 | floating $-153.85
+  2026-08-28T17:10:06  | balance $+10,307.48 | equity $+10,156.21 | floating $-151.27
+  2026-08-28T18:21:26  | balance $+10,307.48 | equity $+10,156.21 | floating $-151.27
+  2026-08-28T21:01:32  | balance $+10,307.48 | equity $+10,156.21 | floating $-151.27
+  2026-08-28T21:16:33  | balance $+10,483.30 | equity $+10,974.86 | floating $+491.56
+  2026-08-28T21:31:34  | balance $+10,681.89 | equity $+10,681.89 | floating $+0.00
+  2026-08-28T21:46:35  | balance $+10,681.89 | equity $+10,681.89 | floating $+0.00
+  2026-08-28T22:01:37  | balance $+10,681.89 | equity $+10,640.21 | floating $-41.68
+  2026-08-28T22:16:38  | balance $+10,131.74 | equity $+10,131.74 | floating $+0.00
+  2026-08-28T22:31:40  | balance $+10,131.74 | equity $+10,131.74 | floating $+0.00
+  2026-08-28T22:46:42  | balance $+10,131.74 | equity $+10,131.74 | floating $+0.00
+  2026-08-28T23:01:44  | balance $+10,131.74 | equity $+10,131.74 | floating $+0.00
+  2026-08-28T23:16:45  | balance $+10,131.74 | equity $+10,131.74 | floating $+0.00
+  2026-08-28T23:31:45  | balance $+10,131.74 | equity $+10,131.74 | floating $+0.00
+  2026-08-28T23:46:47  | balance $+10,131.74 | equity $+10,131.74 | floating $+0.00
+  2026-08-29T00:01:49  | balance $+10,131.74 | equity $+10,131.74 | floating $+0.00
+  2026-08-29T00:16:51  | balance $+10,131.74 | equity $+10,131.74 | floating $+0.00
+  2026-08-29T00:31:53  | balance $+10,131.74 | equity $+10,131.74 | floating $+0.00
+  2026-08-29T00:46:54  | balance $+10,131.74 | equity $+10,131.74 | floating $+0.00
+  2026-08-29T01:01:55  | balance $+10,131.74 | equity $+10,131.74 | floating $+0.00
+  2026-08-29T01:16:57  | balance $+10,131.74 | equity $+10,131.74 | floating $+0.00
+  2026-08-29T01:31:58  | balance $+10,131.74 | equity $+10,131.74 | floating $+0.00
+  2026-08-29T01:46:59  | balance $+10,131.74 | equity $+10,131.74 | floating $+0.00
+  2026-08-29T02:02:00  | balance $+10,131.74 | equity $+10,131.74 | floating $+0.00
+  2026-08-29T02:17:01  | balance $+10,131.74 | equity $+9,931.50 | floating $-200.24
+  2026-08-29T02:32:02  | balance $+10,131.74 | equity $+10,161.08 | floating $+29.34
+  2026-08-29T02:47:02  | balance $+10,131.74 | equity $+10,019.47 | floating $-112.27
+  2026-08-29T03:02:03  | balance $+10,131.74 | equity $+9,987.40 | floating $-144.34
+  2026-08-29T03:17:04  | balance $+10,131.74 | equity $+10,030.63 | floating $-101.11
+  2026-08-29T03:32:05  | balance $+10,131.74 | equity $+9,931.99 | floating $-199.75
+  2026-08-29T03:47:06  | balance $+10,131.74 | equity $+9,953.77 | floating $-177.97
+  2026-08-31T01:22:30  | balance $+10,131.74 | equity $+9,928.49 | floating $-203.25
+  2026-08-31T01:37:31  | balance $+10,131.74 | equity $+9,928.49 | floating $-203.25
+  2026-08-31T01:52:31  | balance $+10,131.74 | equity $+9,928.49 | floating $-203.25
+  2026-08-31T02:07:32  | balance $+10,131.74 | equity $+9,928.49 | floating $-203.25
+  2026-08-31T02:22:33  | balance $+10,131.74 | equity $+9,928.49 | floating $-203.25
+  2026-08-31T02:37:34  | balance $+10,131.74 | equity $+9,928.49 | floating $-203.25
+  2026-08-31T02:52:35  | balance $+10,131.74 | equity $+9,928.49 | floating $-203.25
+  2026-08-31T03:07:36  | balance $+10,131.74 | equity $+9,928.49 | floating $-203.25
+  2026-08-31T03:22:37  | balance $+10,131.74 | equity $+9,928.49 | floating $-203.25
+  2026-08-31T03:37:38  | balance $+10,131.74 | equity $+9,928.49 | floating $-203.25
+  2026-08-31T03:52:39  | balance $+10,131.74 | equity $+9,928.49 | floating $-203.25
+  2026-08-31T04:07:39  | balance $+10,131.74 | equity $+9,928.49 | floating $-203.25
+  2026-08-31T04:22:40  | balance $+10,131.74 | equity $+9,928.49 | floating $-203.25
+  2026-08-31T04:37:41  | balance $+10,131.74 | equity $+9,928.49 | floating $-203.25
+  2026-08-31T04:52:42  | balance $+10,131.74 | equity $+9,928.49 | floating $-203.25
+  2026-08-31T05:07:44  | balance $+9,368.81 | equity $+9,368.81 | floating $+0.00
+  2026-08-31T05:22:44  | balance $+9,368.81 | equity $+9,557.51 | floating $+188.70
+  2026-08-31T05:37:45  | balance $+9,368.81 | equity $+9,257.01 | floating $-111.80
+  2026-08-31T05:52:46  | balance $+9,368.81 | equity $+9,378.22 | floating $+9.41
+  2026-08-31T06:07:47  | balance $+9,368.81 | equity $+9,565.03 | floating $+196.22
+  2026-08-31T06:22:48  | balance $+9,368.81 | equity $+9,552.95 | floating $+184.14
+  2026-08-31T06:37:49  | balance $+9,368.81 | equity $+9,139.99 | floating $-228.82
+  2026-08-31T06:52:51  | balance $+8,878.20 | equity $+8,878.20 | floating $+0.00
+  2026-08-31T07:07:52  | balance $+8,878.20 | equity $+8,840.05 | floating $-38.15
+  2026-08-31T07:22:53  | balance $+8,878.20 | equity $+8,890.01 | floating $+11.81
+  2026-08-31T07:37:54  | balance $+8,878.20 | equity $+9,228.79 | floating $+350.59
+  2026-08-31T07:52:57  | balance $+8,878.20 | equity $+9,087.42 | floating $+209.22
+  2026-08-31T08:08:00  | balance $+8,977.20 | equity $+8,977.20 | floating $+0.00
+  2026-08-31T08:26:22  | balance $+8,977.20 | equity $+8,977.20 | floating $+0.00
+  2026-08-31T08:54:56  | balance $+8,977.20 | equity $+8,977.20 | floating $+0.00
+  2026-08-31T09:09:58  | balance $+8,977.20 | equity $+8,927.86 | floating $-49.34
+  2026-08-31T09:24:59  | balance $+8,977.20 | equity $+8,973.34 | floating $-3.86
+  2026-08-31T09:40:00  | balance $+9,174.05 | equity $+9,612.18 | floating $+438.13
+  2026-08-31T09:55:01  | balance $+9,273.00 | equity $+9,273.00 | floating $+0.00
+  2026-08-31T10:10:03  | balance $+9,273.00 | equity $+9,322.14 | floating $+49.14
+  2026-08-31T10:25:04  | balance $+9,273.00 | equity $+9,525.62 | floating $+252.62
+  2026-08-31T10:40:06  | balance $+9,273.00 | equity $+9,160.34 | floating $-112.66
+  2026-08-31T10:55:07  | balance $+9,273.00 | equity $+9,284.06 | floating $+11.06
+  2026-08-31T11:10:08  | balance $+9,273.00 | equity $+9,081.97 | floating $-191.03
+  2026-08-31T11:25:09  | balance $+9,273.00 | equity $+9,091.47 | floating $-181.53
+  2026-08-31T11:40:10  | balance $+9,273.00 | equity $+9,146.61 | floating $-126.39
+  2026-08-31T11:55:11  | balance $+9,273.00 | equity $+9,146.48 | floating $-126.52
+  2026-08-31T12:10:11  | balance $+9,273.00 | equity $+9,141.37 | floating $-131.63
+  2026-08-31T12:25:12  | balance $+9,273.00 | equity $+9,559.67 | floating $+286.67
+  2026-08-31T12:40:13  | balance $+9,273.00 | equity $+9,612.01 | floating $+339.01
+  2026-08-31T12:55:14  | balance $+9,273.00 | equity $+9,692.33 | floating $+419.33
+  2026-08-31T13:10:15  | balance $+9,467.65 | equity $+9,658.94 | floating $+191.29
+  2026-08-31T13:25:16  | balance $+9,467.65 | equity $+9,754.35 | floating $+286.70
+  2026-08-31T13:40:17  | balance $+9,467.65 | equity $+9,830.82 | floating $+363.17
+  2026-08-31T13:55:18  | balance $+9,467.65 | equity $+9,788.71 | floating $+321.06
+  2026-08-31T14:10:18  | balance $+9,467.65 | equity $+9,804.37 | floating $+336.72
+  2026-08-31T14:25:19  | balance $+9,467.65 | equity $+9,965.95 | floating $+498.30
+  2026-08-31T14:40:20  | balance $+9,467.65 | equity $+9,889.63 | floating $+421.98
+  2026-08-31T14:55:21  | balance $+9,467.65 | equity $+9,916.04 | floating $+448.39
+  2026-08-31T15:10:21  | balance $+9,467.65 | equity $+9,900.08 | floating $+432.43
+  2026-08-31T15:25:24  | balance $+9,766.65 | equity $+9,774.40 | floating $+7.75
+  2026-08-31T15:40:24  | balance $+9,766.65 | equity $+9,824.86 | floating $+58.21
+  2026-08-31T15:55:25  | balance $+9,766.65 | equity $+9,882.48 | floating $+115.83
+  2026-08-31T16:10:26  | balance $+9,766.65 | equity $+9,843.90 | floating $+77.25
+  2026-08-31T16:25:27  | balance $+9,766.65 | equity $+9,756.32 | floating $-10.33
+  2026-08-31T16:40:28  | balance $+9,766.65 | equity $+9,637.55 | floating $-129.10
+  2026-08-31T16:55:28  | balance $+9,766.65 | equity $+9,610.26 | floating $-156.39
+  2026-08-31T17:10:30  | balance $+9,276.60 | equity $+9,276.60 | floating $+0.00
+  2026-08-31T17:25:31  | balance $+9,276.60 | equity $+9,276.60 | floating $+0.00
+  2026-08-31T17:40:32  | balance $+9,276.60 | equity $+9,276.60 | floating $+0.00
+  2026-08-31T17:55:33  | balance $+9,276.60 | equity $+9,276.60 | floating $+0.00
+  2026-08-31T18:51:40  | balance $+9,276.60 | equity $+9,276.60 | floating $+0.00
+  2026-08-31T19:06:43  | balance $+9,276.60 | equity $+9,276.60 | floating $+0.00
+  2026-08-31T19:21:45  | balance $+9,276.60 | equity $+9,276.60 | floating $+0.00
+  2026-08-31T19:36:46  | balance $+9,276.60 | equity $+9,276.60 | floating $+0.00
+  2026-08-31T19:51:47  | balance $+9,276.60 | equity $+9,276.60 | floating $+0.00
+  2026-08-31T20:06:49  | balance $+9,276.60 | equity $+9,276.60 | floating $+0.00
+  2026-08-31T20:21:50  | balance $+9,276.60 | equity $+9,276.60 | floating $+0.00
+  2026-08-31T20:36:51  | balance $+9,276.60 | equity $+9,276.60 | floating $+0.00
+  2026-08-31T20:51:52  | balance $+9,276.60 | equity $+9,276.60 | floating $+0.00
+  2026-08-31T21:06:53  | balance $+9,288.77 | equity $+9,292.98 | floating $+0.00
+  2026-08-31T21:21:54  | balance $+9,314.41 | equity $+9,314.04 | floating $+0.00
+  2026-09-02T09:01:31  | balance $+9,155.73 | equity $+9,345.78 | floating $+190.05
+  2026-09-02T09:16:32  | balance $+9,155.73 | equity $+9,108.54 | floating $-47.19
+  2026-09-02T09:49:31  | balance $+9,155.73 | equity $+9,052.64 | floating $-103.09
+  2026-09-02T15:38:14  | balance $+8,662.96 | equity $+8,659.92 | floating $+0.00
+  2026-09-02T15:53:17  | balance $+8,680.82 | equity $+8,682.80 | floating $+0.00
+  2026-09-02T16:08:19  | balance $+8,664.58 | equity $+8,663.66 | floating $+0.00
+  2026-09-02T16:23:21  | balance $+8,670.08 | equity $+8,670.08 | floating $+0.00
+  2026-09-02T16:38:23  | balance $+8,666.86 | equity $+8,668.46 | floating $+0.00
+  2026-09-02T16:53:25  | balance $+8,654.37 | equity $+8,655.23 | floating $+0.00
+  2026-09-02T17:08:27  | balance $+8,659.74 | equity $+8,660.58 | floating $+0.00
+
+Perubahan equity teramati: $-1,414.28 (turun dari $+10,074.86 ke $+8,660.58)
+
+------------------------------------------------------------------------------------------------
+ D. EVALUASI vs FORWARD-TEST BACKTEST (referensi §10 LAPORAN)
+------------------------------------------------------------------------------------------------
+🟠 WASPADA awal: PF 0.78 < 1.0 tapi sampel baru 21 trade (< 30) — jangan panik, terus observasi.
+
+Siklus hidup daemon        : 6× start, 4× stop (pola on/off Anda terekam lengkap di jurnal).
+Catatan: ada sesi tanpa engine_stop berpasangan (listrik mati / kill paksa) — tidak apa-apa; rekonsiliasi saat start berikutnya sudah menanganinya.
+
+------------------------------------------------------------------------------------------------
+ F. KESEHATAN KONEKSI & INTEGRITAS EKSEKUSI (audit forensik)
+------------------------------------------------------------------------------------------------
+⚠️ 22 snapshot menunjukkan KONEKSI MT5 PUTUS (equity None / connected=False): 2026-09-02T10:04 .. 2026-09-02T15:20
+Loop stall (>2 mnt)        : 4× | terlama 50.0 menit (laptop sleep / MT5 hang — manajemen TP/trailing tidak berjalan selama jeda)
+⛔ TP1 ganda pada tiket    : {'4987805272': 3, '4988300823': 2} (bug LIVE-01 engine lama; diperbaiki v2-d)
+⛔ SL DILONGGARKAN         : 9× (be_lock pasca-TP1 menurunkan SL trailing — bug SL-01; diperbaiki v2-d)
+
+================================================================================================
+ Selesai. Simpan file ini sebagai arsip mingguan bersama trade_journal.jsonl.
+================================================================================================

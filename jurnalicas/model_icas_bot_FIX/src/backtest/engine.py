@@ -19,7 +19,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Any, Tuple, Optional
 from config import config
-from src.indicators.sessions import calculate_session_killzones
+from src.indicators.sessions import calculate_session_killzones, calculate_session_levels_causal
 
 
 def infer_price_point(prices: np.ndarray) -> float:
@@ -47,7 +47,13 @@ class IcasBacktestEngine:
             compounding: bool = False) -> Tuple[float, pd.DataFrame]:
         cfg = self.cfg
 
-        df_m5 = calculate_session_killzones(df_m5_raw)
+        # [AUDIT FIX LA-01] Default: level sesi KAUSAL (tanpa lookahead) — identik
+        # dengan yang dipakai daemon live. Set config.SESSION_LEVELS_LOOKAHEAD=True
+        # hanya untuk mereproduksi angka lama (parity test / komparasi).
+        if getattr(cfg, 'SESSION_LEVELS_LOOKAHEAD', False):
+            df_m5 = calculate_session_killzones(df_m5_raw)
+        else:
+            df_m5 = calculate_session_levels_causal(df_m5_raw)
 
         capital = cfg.INITIAL_CAPITAL
         trades = []
