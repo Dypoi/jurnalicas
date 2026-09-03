@@ -1,0 +1,198 @@
+====================================================================================================
+BACKTEST M1 BID/ASK  —  XAUUSD  —  Jan s/d Jun 2026   (engine teraudit anti-repaint)
+====================================================================================================
+Data         : XAUUSD_M1_20250901_20260901.csv
+Bar          : 204,595 M1 / 40,917 M5  (Des 2025 warm-up, tidak ditradingkan)
+Jendela      : 2026-01-01 .. 2026-06-30  =  154 hari bursa
+Modal        : $10,000
+Spread       : median $0.69 | p95 $1.15  -> MASUK IMPLISIT (BUY di ask, exit di bid)
+Anti-repaint : 24/24 uji lulus  (research/test_antirepaint.py, termasuk truncation invariance)
+
+GEOMETRI YANG DIBANDINGKAN  (SL sama $15.00 = 150 pips)
+  A  TP1 $ 18.75 (1.25R) | TP2 $ 37.50 (2.50R) | TP3 $  56.25 (3.75R) | trail 100p/30p | killzone off | max/day 999 | CB 999
+  B  TP1 $ 11.25 (0.75R) | TP2 $ 18.75 (1.25R) | TP3 $  30.00 (2.00R) | trail 60p/25p | killzone ON | max/day 6 | CB 3
+  C  TP1 $ 11.25 (0.75R) | TP2 $ 18.75 (1.25R) | TP3 $  30.00 (2.00R) | trail 60p/25p | killzone off | max/day 999 | CB 999
+  D  TP1 $ 18.75 (1.25R) | TP2 $ 37.50 (2.50R) | TP3 $  56.25 (3.75R) | trail 99999p/0p | killzone off | max/day 999 | CB 999
+  E  TP1 $ 15.00 (1.00R) | TP2 $9999.90 (666.66R) | TP3 $9999.90 (666.66R) | trail 99999p/0p | killzone off | max/day 999 | CB 999
+
+====================================================================================================
+PRA-SYARAT: SPREAD GUARD config.py TIDAK COCOK DENGAN FEED INI
+====================================================================================================
+  MAX_SPREAD_POINTS = 350  ==  $0.35
+  Bar feed ini yang lolos guard : 0.29%   (median spread $0.69)
+  Bila guard dipakai apa adanya : 3 trade dalam 6 bulan  -> bot praktis tidak pernah entry.
+  Semua run di bawah memakai guard $1.20 (p95 feed ini) supaya perbandingan geometrinya bermakna.
+
+TABEL 1  —  HASIL UTAMA, risk 1%  (perbandingan yang bisa dibaca)
+----------------------------------------------------------------------------------------------------
+Konfigurasi                        Trades    WR%     PF       Net $    Exp $     DD%       DD $ Tr/hari  TP1%  TP2%  TP3% Payoff Bangkrut
+----------------------------------------------------------------------------------------------------
+A @ risk 1% ($100/trade)    729  58.71   0.93   -2,100.38    -2.88   29.38   3,180.31    4.73 25.20  5.10  1.20   0.66    tidak
+B @ risk 1% ($100/trade)    177  63.84   0.67   -2,233.58   -12.62   25.01   2,553.97    1.15 27.10  2.80  0.60   0.38    tidak
+C @ risk 1% ($100/trade)    968  67.15   0.84   -5,300.32    -5.48   54.20   5,419.93    6.29 28.80  7.00  1.40   0.41    tidak
+D @ risk 1% ($100/trade)    232  38.79   0.65   -5,236.58   -22.57   52.95   5,361.27    1.51 38.80 19.00 11.20   1.02    tidak
+E @ risk 1% ($100/trade)    798  47.24   0.90   -4,620.00    -5.79   50.39   5,145.00    5.18 47.20  0.00  0.00   1.00    tidak
+----------------------------------------------------------------------------------------------------
+
+TABEL 2  —  SENSITIVITAS: risk 5% seperti config.py saat ini
+----------------------------------------------------------------------------------------------------
+Konfigurasi                        Trades    WR%     PF       Net $    Exp $     DD%       DD $ Tr/hari  TP1%  TP2%  TP3% Payoff Bangkrut
+----------------------------------------------------------------------------------------------------
+A @ risk 5% ($500/trade) = config.py    719  58.69   0.93  -10,067.80   -14.00  100.49  13,955.53    4.67 25.00  5.10  1.30   0.66       YA
+B @ risk 5% ($500/trade) = config.py    139  61.87   0.62  -10,053.61   -72.33  100.49  11,055.15    0.90 26.60  2.90  0.70   0.38       YA
+C @ risk 5% ($500/trade) = config.py    187  62.57   0.71  -10,059.02   -53.79  100.59  10,059.02    1.21 29.40  5.90  1.60   0.42       YA
+D @ risk 5% ($500/trade) = config.py     53  32.08   0.43  -10,147.46  -191.46  101.39  10,735.27    0.34 32.10 13.20  7.50   0.91       YA
+E @ risk 5% ($500/trade) = config.py    129  41.86   0.72  -10,395.00   -80.58  103.59  11,385.00    0.84 41.90  0.00  0.00   1.00       YA
+----------------------------------------------------------------------------------------------------
+
+TABEL 3  —  PEMBANDING REPAINT (replika calculate_session_killzones())
+----------------------------------------------------------------------------------------------------
+Konfigurasi                        Trades    WR%     PF       Net $    Exp $     DD%       DD $ Tr/hari  TP1%  TP2%  TP3% Payoff Bangkrut
+----------------------------------------------------------------------------------------------------
+A @ risk 1%, level sesi BOCOR (bug produksi)    517  64.80   1.36    6,934.98    13.41    9.33   1,729.30    3.36 30.00  7.70  2.30   0.74    tidak
+B @ risk 1%, level sesi BOCOR (bug produksi)    124  66.94   0.78     -927.89    -7.48   14.29   1,436.31    0.81 28.20  4.80  0.80   0.39    tidak
+C @ risk 1%, level sesi BOCOR (bug produksi)    672  72.62   1.18    3,462.54     5.15    8.70   1,271.21    4.36 33.80 10.40  2.40   0.44    tidak
+D @ risk 1%, level sesi BOCOR (bug produksi)     46  43.48   1.29      787.56    17.12    6.62     735.00    0.30 43.50 32.60 30.40   1.68    tidak
+E @ risk 1%, level sesi BOCOR (bug produksi)    571  55.52   1.25    6,615.00    11.58    8.85   1,155.00    3.71 55.50  0.00  0.00   1.00    tidak
+----------------------------------------------------------------------------------------------------
+
+TABEL 4  —  PEMBANDING ENTRY ACAK (mengukur edge sinyal)
+----------------------------------------------------------------------------------------------------
+Konfigurasi                        Trades    WR%     PF       Net $    Exp $     DD%       DD $ Tr/hari  TP1%  TP2%  TP3% Payoff Bangkrut
+----------------------------------------------------------------------------------------------------
+A @ risk 1%, ENTRY ACAK (geometri sama)   1040  56.83   0.90   -4,844.59    -4.66   60.69   6,878.64    6.75 25.20  5.00  0.90   0.68    tidak
+B @ risk 1%, ENTRY ACAK (geometri sama)    321  69.16   0.82   -1,867.54    -5.82   20.67   2,066.75    2.08 23.70  6.90  1.20   0.37    tidak
+C @ risk 1%, ENTRY ACAK (geometri sama)   1548  68.22   0.94   -3,359.35    -2.17   47.79   5,798.31   10.05 29.70 10.00  1.70   0.44    tidak
+D @ risk 1%, ENTRY ACAK (geometri sama)     67  44.78   0.76     -918.64   -13.71   13.52   1,351.86    0.44 44.80 17.90 11.90   0.94    tidak
+E @ risk 1%, ENTRY ACAK (geometri sama)   1059  47.69   0.91   -5,145.00    -4.86   59.23   5,985.00    6.88 47.70  0.00  0.00   1.00    tidak
+----------------------------------------------------------------------------------------------------
+
+====================================================================================================
+SEBERAPA BESAR SUMBANGAN REPAINT
+====================================================================================================
+  A: bersih  PF  0.934  net $    -2,100  WR 58.71%   |   repaint PF  1.363  net $     6,935  WR  64.8%   ->  repaint MENGGELEMBUNGKAN net sebesar $+9,035
+  B: bersih  PF  0.668  net $    -2,234  WR 63.84%   |   repaint PF  0.784  net $      -928  WR 66.94%   ->  repaint MENGGELEMBUNGKAN net sebesar $+1,306
+  C: bersih  PF  0.841  net $    -5,300  WR 67.15%   |   repaint PF  1.179  net $     3,463  WR 72.62%   ->  repaint MENGGELEMBUNGKAN net sebesar $+8,763
+  D: bersih  PF  0.649  net $    -5,237  WR 38.79%   |   repaint PF  1.288  net $       788  WR 43.48%   ->  repaint MENGGELEMBUNGKAN net sebesar $+6,024
+  E: bersih  PF  0.895  net $    -4,620  WR 47.24%   |   repaint PF  1.248  net $     6,615  WR 55.52%   ->  repaint MENGGELEMBUNGKAN net sebesar $+11,235
+
+====================================================================================================
+EDGE SINYAL vs ENTRY ACAK
+====================================================================================================
+  A: PF sinyal  0.934 vs PF acak  0.897  (+0.037)   |  expectancy $  -2.88 vs $  -4.66   |  net $   -2,100 vs $   -4,845
+  B: PF sinyal  0.668 vs PF acak   0.82  (-0.152)   |  expectancy $ -12.62 vs $  -5.82   |  net $   -2,234 vs $   -1,868
+  C: PF sinyal  0.841 vs PF acak  0.935  (-0.094)   |  expectancy $  -5.48 vs $  -2.17   |  net $   -5,300 vs $   -3,359
+  D: PF sinyal  0.649 vs PF acak  0.764  (-0.115)   |  expectancy $ -22.57 vs $ -13.71   |  net $   -5,237 vs $     -919
+  E: PF sinyal  0.895 vs PF acak  0.912  (-0.017)   |  expectancy $  -5.79 vs $  -4.86   |  net $   -4,620 vs $   -5,145
+
+====================================================================================================
+KENAPA WR TINGGI TAPI RUGI  —  komposisi 'WIN'
+====================================================================================================
+  --- A ---
+     total 729 trade | WIN 428 | LOSS 301
+     dari 428 WIN: 360 (84%) adalah scratch trailing-lock rata $45, hanya 68 win substantif rata $196
+     WR tercatat 58.7%  tapi  WR win-substantif 9.3%
+     avg win $68.94 vs avg loss $-105.00  -> butuh WR 60.4% untuk break-even
+  --- B ---
+     total 177 trade | WIN 113 | LOSS 64
+     dari 113 WIN: 112 (99%) adalah scratch trailing-lock rata $39, hanya 1 win substantif rata $154
+     WR tercatat 63.8%  tapi  WR win-substantif 0.6%
+     avg win $39.70 vs avg loss $-105.00  -> butuh WR 72.6% untuk break-even
+  --- C ---
+     total 968 trade | WIN 650 | LOSS 318
+     dari 650 WIN: 640 (98%) adalah scratch trailing-lock rata $41, hanya 10 win substantif rata $161
+     WR tercatat 67.1%  tapi  WR win-substantif 1.0%
+     avg win $43.21 vs avg loss $-105.00  -> butuh WR 70.8% untuk break-even
+  --- D ---
+     total 232 trade | WIN 90 | LOSS 142
+     dari 90 WIN: 64 (71%) adalah scratch trailing-lock rata $58, hanya 26 win substantif rata $230
+     WR tercatat 38.8%  tapi  WR win-substantif 11.2%
+     avg win $107.48 vs avg loss $-105.00  -> butuh WR 49.4% untuk break-even
+  --- E ---
+     total 798 trade | WIN 377 | LOSS 421
+     dari 377 WIN: 377 (100%) adalah scratch trailing-lock rata $105, hanya 0 win substantif rata $0
+     WR tercatat 47.2%  tapi  WR win-substantif 0.0%
+     avg win $105.00 vs avg loss $-105.00  -> butuh WR 50.0% untuk break-even
+
+====================================================================================================
+KETERCAPAIAN TARGET  —  MFE trade vs level TP (geometri A)
+====================================================================================================
+  MFE (gerak menguntungkan maksimum) : median $10.92 | rata $13.35 | p75 $18.90 | p90 $29.41 | maks $95.54
+  TP1 $ 18.75 : dicapai  25.2% trade   (184 dari 729)
+  TP2 $ 37.50 : dicapai   5.2% trade   (38 dari 729)
+  TP3 $ 56.25 : dicapai   1.2% trade   (9 dari 729)
+  trailing lock $3.00 setelah MFE $10.00 : 58.8% trade menyentuhnya
+  -> TP2/TP3 praktis tidak pernah tercapai; struktur 4-tier berjalan sebagai 1 tier + scratch.
+
+====================================================================================================
+RINCIAN PER BULAN  (risk 1%)
+====================================================================================================
+
+  --- A: A - PLAN SAAT INI (config.py) ---
+  bulan          n     WR%      PF        net $   tr/hari  hari bursa
+  2026-01      102    59.8    1.05          201      3.92          26
+  2026-02      117    61.5    0.89         -522      4.88          24
+  2026-03      169    58.6    0.91         -632      6.26          27
+  2026-04      117    58.1    1.01           71      4.68          25
+  2026-05      109    60.6    0.91         -394      4.19          26
+  2026-06      115    53.9    0.85         -823      4.42          26
+  TOTAL        729    58.7    0.93       -2,100      4.73
+
+  --- B: B - REKOMENDASI (target dipadatkan + killzone + CB) ---
+  bulan          n     WR%      PF        net $   tr/hari  hari bursa
+  2026-01       31    64.5    0.67         -385      1.19          26
+  2026-02       25    68.0    0.77         -196      1.04          24
+  2026-03       35    62.9    0.80         -274      1.30          27
+  2026-04       25    60.0    0.48         -549      1.00          25
+  2026-05       32    56.2    0.41         -872      1.23          26
+  2026-06       29    72.4    1.05           43      1.12          26
+  TOTAL        177    63.8    0.67       -2,234      1.15
+
+  --- C: C - REKOMENDASI tanpa killzone (ablasi) ---
+  bulan          n     WR%      PF        net $   tr/hari  hari bursa
+  2026-01      147    64.6    0.79       -1,172      5.65          26
+  2026-02      143    68.5    0.95         -252      5.96          24
+  2026-03      224    66.5    0.86       -1,093      8.30          27
+  2026-04      159    73.0    1.03          130      6.36          25
+  2026-05      148    67.6    0.75       -1,273      5.69          26
+  2026-06      147    62.6    0.72       -1,640      5.65          26
+  TOTAL        968    67.2    0.84       -5,300      6.29
+
+  --- D: D - PLAN SAAT INI, trailing DIMATIKAN ---
+  bulan          n     WR%      PF        net $   tr/hari  hari bursa
+  2026-01       41    34.1    0.51       -1,391      1.58          26
+  2026-02       53    34.0    0.52       -1,752      2.21          24
+  2026-03       55    38.2    0.70       -1,083      2.04          27
+  2026-04       49    49.0    0.87         -335      1.96          25
+  2026-05       34    38.2    0.69         -676      1.31          26
+  TOTAL        232    38.8    0.65       -5,237      1.51
+
+  --- E: E - single tier 1.0R, close 100%, tanpa trailing ---
+  bulan          n     WR%      PF        net $   tr/hari  hari bursa
+  2026-01      111    44.1    0.79       -1,365      4.27          26
+  2026-02      123    47.2    0.89         -735      5.12          24
+  2026-03      187    50.8    1.03          315      6.93          27
+  2026-04      131    51.1    1.05          315      5.24          25
+  2026-05      119    44.5    0.80       -1,365      4.58          26
+  2026-06      127    43.3    0.76       -1,785      4.88          26
+  TOTAL        798    47.2    0.90       -4,620      5.18
+
+====================================================================================================
+VALIDASI SILANG  —  backtest vs JURNAL LIVE (logs/trade_journal.jsonl)
+====================================================================================================
+  close event 26 untuk 21 tiket unik (5 duplikat -> bug F-03)
+  PERINGKAH: menjumlah semua close event memberi $-510.70 (SALAH, dobel).
+  realized_total kumulatif -> pakai event terakhir: net $-1,306.66
+
+                              trades     WR%      PF       net $     exp $    TP1%
+  Backtest A @ risk 5%           719    58.7    0.93     -10,068    -14.00    25.0
+  Live (26 Agu - 02 Sep)          21    42.9    0.78      -1,307    -62.22    33.3
+
+  Catatan pembanding:
+   - WR live lebih rendah karena 'WIN' backtest mencakup scratch trailing-lock
+     (57% dari win backtest hanya ~$45).
+   - Keduanya PF < 1. Selisih expectancy live vs backtest konsisten dengan
+     slippage nyata $1.27/entry (F-17) yang tidak ada di data historis, plus
+     kerusakan pemenang oleh bug F-03/F-05 yang baru diperbaiki.
+   - Live n=21 terlalu kecil untuk memisahkan PF 0.78 dari 1.0; backtest n=729
+     memberi interval yang jauh lebih sempit dan tetap < 1.

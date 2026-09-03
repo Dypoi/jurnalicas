@@ -52,6 +52,33 @@ def _auth_guard():
 _cached_trades = []
 _cached_stats = {}
 
+
+def _journal_health():
+    """[F-08] Kesehatan penulis jurnal milik DAEMON (dibaca dari marker file).
+
+    Dashboard berjalan sebagai proses terpisah dari daemon, jadi status penulis
+    jurnal tidak bisa diambil dari objek TradeJournal daemon. Sebagai gantinya
+    daemon menulis `logs/trade_journal.health.json` tiap siklus (lihat
+    icas_daemon.py) dan dashboard membacanya di sini.
+    """
+    hp = getattr(config, "JOURNAL_HEALTH_FILE", "")
+    if not hp or not os.path.exists(hp):
+        return {"available": False}
+    try:
+        with open(hp, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        age = None
+        try:
+            age = (datetime.datetime.now()
+                   - datetime.datetime.fromisoformat(data.get("ts", ""))).total_seconds()
+        except Exception:
+            pass
+        data["available"] = True
+        data["age_seconds"] = round(age, 1) if age is not None else None
+        return data
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
 # ============================ [D-05] JURNAL ENGINE v2 ============================
 
 def _journal_events(limit_bytes: int = 2_000_000):
@@ -414,6 +441,13 @@ def api_status():
         "spread_usd": round(tick["spread"] * price_point, 2),
         "price_point": price_point,
         "spread_status": "NORMAL (Aman) ✅" if tick["spread"] <= config.MAX_SPREAD_POINTS else "TINGGI ⚠️",
+        # [AUDIT FORENSIK 2 — F-04/F-08] visibilitas kesehatan koneksi & jurnal.
+        # Sebelumnya dashboard tidak bisa membedakan "harga 0 karena feed mati"
+        # dari "harga 0 karena pasar", dan kegagalan tulis jurnal tak terlihat.
+        "feed_valid": bool(tick.get("valid", True)),
+        "feed_reason": tick.get("reason", "ok"),
+        "tick_age_seconds": tick.get("age_seconds"),
+        "terminal_healthy": bridge.is_feed_healthy(),
         "account": acc_info,
         "risk_pct": config.RISK_PER_TRADE_PCT * 100,
         "sl_pips": config.STOP_LOSS_PIPS,
@@ -428,6 +462,7 @@ def api_status():
         "trailing_step": config.TRAILING_STEP_PIPS,
         "trailing_lock": config.TRAILING_LOCK_PIPS,
         "journal": journal_summary(),
+        "journal_health": _journal_health(),
         "daily_trades_count": strategy_engine.daily_trades_count,
         "active_position": pos_data
     })

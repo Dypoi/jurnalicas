@@ -97,6 +97,41 @@ class IcasConfig:
     STATE_RESTORE_FROM_DEALS: bool = True     # Rebuild status TP dari riwayat deal jika file hilang
 
     # ============================================================================
+    # [AUDIT FORENSIK 2 — 02 Sep 2026] KETAHANAN TERHADAP ERROR / KONEKSI TERPUTUS
+    # ============================================================================
+    # F-02/F-03: Konfirmasi penutupan posisi. Posisi TIDAK boleh dinyatakan tutup
+    # (dan state manajemennya dihapus) hanya karena positions_get() kosong beberapa
+    # kali — saat terminal putus koneksi, MT5 mengembalikan () bukan None.
+    POSITION_MISS_LIMIT: int = 5              # miss berurutan sebelum konfirmasi tutup
+    CLOSE_REQUIRE_BROKER_PROOF: bool = True   # wajib ada deal OUT di riwayat broker
+    CLOSED_TOMBSTONE_KEEP: int = 40           # jumlah tiket "tutup" yang disimpan utk revive
+    POSITION_REVIVE_WINDOW_SECONDS: int = 3600  # tiket yg muncul lagi < 1 jam = revive, bukan posisi baru
+    # [T-04] Mutex ditahan selama ada tiket menunggu konfirmasi tutup. Katup
+    # pengaman: setelah ini (detik) tanpa kepastian broker, entry diizinkan lagi
+    # agar bot tidak macet selamanya (SL posisi lama tetap aktif di broker).
+    MAX_PENDING_CLOSE_SECONDS: int = 900
+
+    # F-04: Guard feed. Tick bid/ask 0 atau basi = feed mati -> SEMUA manajemen
+    # posisi & entry dilewati. Tanpa ini, posisi SELL dengan tick 0 menghasilkan
+    # fav_usd = entry - 0 = ~$4600 -> TP1/TP2/TP3 + trailing step 46 meledak.
+    MAX_TICK_AGE_SECONDS: int = 120           # 0 = nonaktifkan pemeriksaan umur tick
+    REQUIRE_VALID_TICK: bool = True
+
+    # F-11: TP tier dieksekusi berdasarkan harga SAAT INI, bukan max_fav historis.
+    # max_fav tetap dipakai untuk trailing (itu memang fungsinya). Dengan True,
+    # partial close tidak pernah dieksekusi di harga yang lebih buruk dari level TP.
+    TP_TRIGGER_ON_CURRENT_PRICE: bool = True
+
+    # F-06: Daemon tidak boleh mati karena satu exception transien.
+    RESILIENT_CYCLE: bool = True
+    MAX_CONSECUTIVE_CYCLE_ERRORS: int = 20    # setelah ini daemon berhenti sadar (bukan spin)
+
+    # F-15: Rotasi jurnal agar logs/trade_journal.jsonl tidak tumbuh tanpa batas.
+    JOURNAL_MAX_BYTES: int = 20_000_000       # 0 = tanpa rotasi
+    JOURNAL_KEEP_ROTATED: int = 5
+    JOURNAL_HEALTH_FILE: str = "logs/trade_journal.health.json"
+
+    # ============================================================================
     # [ENGINE BARU v2 "SWING-150" — 25 Agu 2026] Identitas + Jurnal Observasi JSON
     # ============================================================================
     ENGINE_VERSION: str = "icas-v2-swing150-c (kalibrasi 25 Agu 2026)"

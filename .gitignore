@@ -1,0 +1,25 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Artefak runtime daemon (dibuat ulang saat engine jalan)
+jurnalicas/model_icas_bot_FIX/logs/trade_journal.health.json
+jurnalicas/model_icas_bot_FIX/logs/*.jsonl.*
+jurnalicas/model_icas_bot_FIX/state/*.tmp
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Catatan: jurnalicas/XAUUSD_M1/ (451 MB) SENGAJA di-track agar sama dengan
+# origin/main. Blob-nya identik (git hash-object cocok), jadi tidak menambah
+# objek baru di remote. Jangan hapus dari index: PR ke main akan tampak
+# menghapus dataset.
