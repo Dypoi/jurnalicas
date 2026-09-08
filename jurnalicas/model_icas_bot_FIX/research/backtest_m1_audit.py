@@ -59,6 +59,12 @@ class StratCfg:
     max_consec_losses: int = 999
     max_spread_usd: float = 1.20          # guard, disetel ke feed ini (lihat laporan)
     risk_usd: float = 500.0               # fixed $ risk per trade (5% dari $10k)
+    # ---- [TUNING 08 Sep 2026] mode sinyal & filter tren (default = perilaku lama persis) ----
+    signal_mode: str = "choch"            # "choch" (swing-break/FVG) | "cisd" (Change in State of Delivery)
+    trend_filter: str | None = None       # None | "sma200d" | "ema200d" | "ema200m5"
+    #  Kolom yang harus ADA di m5 bila dipakai:
+    #    cisd mode  -> "cisd_bull", "cisd_bear"   (level CISD, NaN = tidak ada)
+    #    filter     -> "ma_sma200d" / "ma_ema200d" / "ma_ema200m5"
 
 
 CFG_CURRENT = StratCfg(name="A - PLAN SAAT INI (config.py)")
@@ -213,7 +219,16 @@ def in_killzone(hour: int, minute: int) -> bool:
 
 
 def signal_at(m5: pd.DataFrame, i: int, cfg: StratCfg) -> str | None:
-    """[A2] Setup ICT pada bar M5 ke-i yang SUDAH TUTUP."""
+    """[A2] Setup ICT pada bar M5 ke-i yang SUDAH TUTUP.
+
+    [TUNING 08 Sep 2026] dua ekstensi opsional (default = perilaku lama persis):
+      signal_mode="cisd"  -> displacement memakai level CISD (Change in State of
+                             Delivery): close menembus open bar pertama dari run
+                             N candle searah sebelumnya (kolom cisd_bull/bear).
+      trend_filter=...    -> BUY hanya bila close > MA, SELL hanya bila close < MA
+                             (kolom ma_sma200d / ma_ema200d / ma_ema200m5 —
+                             MA harian memakai nilai KEMARIN (selesai), kausal).
+    """
     if i < 10:
         return None
     row = m5.iloc[i]
@@ -227,15 +242,41 @@ def signal_at(m5: pd.DataFrame, i: int, cfg: StratCfg) -> str | None:
     c, o = row["close"], row["open"]
     bsl = max(row["asian_high"], row["london_high"])
     ssl = min(row["asian_low"], row["london_low"])
-    bull_fvg = row["low"] > m5["high"].iat[i - 2] + 0.30
-    bear_fvg = row["high"] < m5["low"].iat[i - 2] - 0.30
-    swing_h = m5["high"].iloc[i - 6:i - 1].max()
-    swing_l = m5["low"].iloc[i - 6:i - 1].min()
-    if (m5["low"].iat[i - 1] <= ssl or m5["low"].iat[i - 2] <= ssl) and \
-       ((c > o) and (c > swing_h or bull_fvg)):
+
+    mode = getattr(cfg, "signal_mode", "choch") or "choch"
+    if mode == "cisd":
+        if "cisd_bull" not in m5.columns or "cisd_bear" not in m5.columns:
+            raise ValueError("signal_mode='cisd' membutuhkan kolom cisd_bull/cisd_bear "
+                             "di m5 (lihat research/tuning_trend_filter.py)")
+        lvl_b = row.get("cisd_bull", np.nan)
+        lvl_s = row.get("cisd_bear", np.nan)
+        bull_disp = (c > o) and (not pd.isna(lvl_b)) and (c > lvl_b)
+        bear_disp = (c < o) and (not pd.isna(lvl_s)) and (c < lvl_s)
+    else:
+        bull_fvg = row["low"] > m5["high"].iat[i - 2] + 0.30
+        bear_fvg = row["high"] < m5["low"].iat[i - 2] - 0.30
+        swing_h = m5["high"].iloc[i - 6:i - 1].max()
+        swing_l = m5["low"].iloc[i - 6:i - 1].min()
+        bull_disp = (c > o) and (c > swing_h or bull_fvg)
+        bear_disp = (c < o) and (c < swing_l or bear_fvg)
+
+    tf = getattr(cfg, "trend_filter", None)
+    if tf:
+        col = {"sma200d": "ma_sma200d", "ema200d": "ma_ema200d",
+               "ema200m5": "ma_ema200m5"}.get(tf)
+        if col is None:
+            raise ValueError(f"trend_filter tidak dikenal: {tf}")
+        ma = row.get(col, np.nan)
+        if pd.isna(ma):
+            return None
+        if not (c > ma):
+            bull_disp = False
+        if not (c < ma):
+            bear_disp = False
+
+    if (m5["low"].iat[i - 1] <= ssl or m5["low"].iat[i - 2] <= ssl) and bull_disp:
         return "BUY"
-    if (m5["high"].iat[i - 1] >= bsl or m5["high"].iat[i - 2] >= bsl) and \
-       ((c < o) and (c < swing_l or bear_fvg)):
+    if (m5["high"].iat[i - 1] >= bsl or m5["high"].iat[i - 2] >= bsl) and bear_disp:
         return "SELL"
     return None
 
