@@ -72,7 +72,9 @@ def main():
     cfg_sig = make_cfg()
     buy_sig, sell_sig = precompute_signals(df, cfg_sig)
 
-    print("\n— BASELINE (parameter Anda saat ini: SL 20p, TP 20/40/60, BE 10p) —")
+    print(f"\n— BASELINE (parameter config saat ini: SL {config.STOP_LOSS_PIPS:.0f}p, "
+          f"TP {config.TP1_PIPS:.1f}/{config.TP2_PIPS:.1f}/{config.TP3_PIPS:.1f}p, "
+          f"BE {config.EARLY_BE_TRIGGER_PIPS:.0f}p) —")
     st_base_tr = run_granular(df, fine, config, TRAIN_START, TRAIN_END, buy_sig, sell_sig)
     st_base_te = run_granular(df, fine, config, TEST_START, TEST_END, buy_sig, sell_sig)
     print(row("  baseline TRAIN", st_base_tr))
