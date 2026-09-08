@@ -4,7 +4,7 @@
 **Uji lintas rezim : 2021–22 (bearish) dan 2022–23 (recovery)**
 **Engine : `research/backtest_m1_audit.py` (bid/ask, anti-repaint, pesimis, spread riil, guard $1.20)**
 **Skrip : `research/tuning_mtf.py` (`--exec m5`, default sejak rev ini) — artefak: `model_icas_bot_FIX/reports/tuning_mtf_*_execm5.txt`**
-**Revisi : 08 September 2026 — rev 1 = eksekusi M1; rev 2 = eksekusi M5 (instruksi pengguna: "eksekusinya di m5 jangan m1")**
+**Revisi : 08 September 2026 — rev 1 = eksekusi M1; rev 2 = eksekusi M5 (instruksi pengguna: "eksekusinya di m5 jangan m1"); rev 2.1 = tuning lanjutan (grid jendela PDH/PDL + filter tren SMA200 + sensitivitas tp_first)**
 
 ---
 
@@ -37,10 +37,18 @@
    **Kumulatif 3 periode risk 1%: V7 +$1.345, V8 +$1.230** — keduanya melampaui versi M1-exec
    (V7 +$1.131, V8 +$1.125) dan tetap satu-satunya keluarga varian yang kumulatif positif.
 5. Reality-check risk 5%: V7 +$4.224 (DD 28,6%) bertahan; V8 +$4.538 tapi DD 52,6% — tidak layak.
-6. **Rekomendasi**: kandidat default DEMO berikutnya = **V7 pada eksekusi M5** (frekuensi rendah,
-   ~7 entry/bulan, WR 65,5%, DD 6,3%), dengan **V8** sebagai alternatif frekuensi menengah
-   (~20/bulan). Risk maks 1%. **Status tetap DEMO** — 2022–23 masih rugi tipis dan sampel
-   kandidat kecil (60–246 trade/tahun).
+6. **[REV 2.1 — tuning lanjutan]** Grid jendela sweep PDH/PDL (10 mnt→24 jam) + kombinasi filter
+   tren SMA200-harian. Dua temuan: (a) jendela 24 jam (W24h) paling produktif di periode utama
+   (855 tr, PF 1,15, +$5.257) **tetapi gagal di kedua rezim lain** (−$366 / −$1.252) →
+   rezim-specific, bukan kandidat; (b) setelah fix bug gate `trend_filter` (mode mtf tadinya
+   return sebelum filter tereksekusi), **V7T = V7 + SMA200-harian menjadi kandidat terbaik
+   sepanjang seri**: 45 tr, WR 73,3%, PF 1,95, +$1.192, DD 3,1% (risk 1%), kumulatif 3 periode
+   **+$1.668**, dan di 2021–22 profit +$647 dengan kontrol acak PF 0,60 (jelas di atas
+   keberuntungan). Sensitivitas `tp_first` (batas optimis): V7T PF 2,24, V7 1,37, W24h 1,17 →
+   edge bertahan di kedua batas asumsi.
+7. **Rekomendasi (rev 2.1)**: kandidat default DEMO = **V7T** (frekuensi sangat rendah ~4/bln);
+   alternatif V7 (tanpa filter tren) dan V8T (~12/bln). Risk maks 1%. **Status tetap DEMO** —
+   2022–23 masih −$171 dan sampel kandidat kecil (34–49 tr/tahun).
 
 ---
 
@@ -214,23 +222,85 @@ terlewati (2022–23 masih minus tipis).
    menurunkan kualitas ke level marginal (V3/V4 PF 1,06–1,07 vs kontrol acak 0,89 — masih
    di atas acak tapi jauh di bawah V7/V8 per trade).
 
-## 8. KESIMPULAN & REKOMENDASI
+## 8. TUNING LANJUTAN (REV 2.1) — GRID JENDELA PDH/PDL + FILTER TREN SMA200-HARIAN
+
+Tiga eksperimen lanjutan di atas eksekusi M5, semuanya dengan gerbang yang sama (kontrol acak,
+lintas rezim, reality-check risk). **Bug penting ditemukan & difix di tengah batch**: pada
+`signal_at()`, mode mtf melakukan `return` sebelum gate `trend_filter` tereksekusi, sehingga
+varian kombinasi (V*T) mula-mula tidak berbeda dari V7/V8. Diagnosis bar-level (filter seharusnya
+memblokir 43/137 kandidat BUY dan 64/116 SELL) membuktikan angka identik itu adalah bug, bukan
+redundansi. Setelah fix: V*T berbeda nyata, sementara V/W/R **terverifikasi tidak berubah**
+(regresi bersih), `test_exec_m5.py` 6 PASS, `test_antirepaint.py` 24 PASS.
+
+### 8.1 Grid jendela sweep PDH/PDL (periode utama 2025–26, risk 1%)
+
+| Jendela | Tr | WR% | PF | Net $ | Exp $/tr | DD% |
+|---|---:|---:|---:|---:|---:|---:|
+| 10 mnt (2 bar) = V7 | 87 | 65,5 | 1,28 | +896 | +10,30 | 6,3 |
+| 30 mnt | 109 | 65,1 | 1,18 | +727 | +6,67 | 6,1 |
+| 1 jam | 139 | 63,3 | 1,20 | +1.082 | +7,78 | 7,7 |
+| 2 jam | 192 | 61,5 | 1,10 | +752 | +3,92 | 11,4 |
+| 4 jam = V8 | 246 | 62,2 | 1,10 | +963 | +3,91 | 12,7 |
+| 8 jam | 358 | 62,9 | 1,09 | +1.268 | +3,54 | 13,6 |
+| 12 jam | 445 | 61,8 | 1,09 | +1.620 | +3,64 | 20,8 |
+| **24 jam** | **855** | 61,2 | **1,15** | **+5.257** | +6,15 | 12,4 |
+
+Pola: jendela sempit = kualitas/trade tertinggi; jendela lebar = frekuensi & net tertinggi.
+W24h tampak superior di periode utama — **tetapi uji lintas rezim memveto**: 2021–22 −$366
+(PF 0,96), 2022–23 −$1.252 (PF 0,85). Sweep "kapan saja hari ini" hanya bekerja di tren
+bull yang persisten; tidak dijadikan kandidat.
+
+### 8.2 Kombinasi kaskade MTF + filter tren SMA200-harian (post-fix)
+
+| Varian | 2025–26 | 2021–22 | 2022–23 | Kumulatif |
+|---|---:|---:|---:|---:|
+| **V7T** (fresh + SMA200d) | 45 tr, WR 73,3, PF **1,95**, +$1.192, DD 3,1% | 49 tr, PF 1,41, +$647 | 34 tr, PF 0,90, −$171 | **+$1.668** |
+| **V8T** (4 jam + SMA200d) | 146 tr, WR 63,0, PF 1,25, +$1.392, DD 6,6% | 91 tr, PF 1,01, +$47 | 68 tr, PF 0,98, −$50 | +$1.389 |
+| V7 (tanpa filter, pembanding) | 87 tr, PF 1,28, +$896 | 71 tr, PF 1,30, +$736 | 60 tr, PF 0,90, −$287 | +$1.345 |
+
+Kontrol acak per periode: 2025–26 PF 0,93 (−$1.219); 2021–22 PF 0,60 (−$1.780); 2022–23
+PF 0,76 (−$899). Catatan penting 2021–22: pada rev 2, V7 di rezim ini tak terbedakan dari
+kontrol acak yang "beruntung" (PF 1,28); pada rev 2.1 kontrol acak periode yang sama PF 0,60
+dan **V7T +$647 jelas di atas keberuntungan** — filter SMA200-harian menambah robustness rezim,
+bukan hanya memangkas frekuensi. BUY/SELL V7T 31/14 di periode utama: filter memangkas terutama
+SELL kontra-tren di tahun bull.
+
+### 8.3 Sensitivitas asumsi eksekusi intra-candle (`tp_first`, batas optimis)
+
+| Varian | Pesimis [A5] (dipakai laporan) | Optimis tp_first | Selisih net |
+|---|---|---|---|
+| V7 | PF 1,28 / +$896 | PF 1,37 / +$1.132 | +$236 |
+| V7T | PF 1,95 / +$1.192 | PF 2,24 / +$1.428 | +$236 |
+| W24h | PF 1,15 / +$5.257 | PF 1,17 / +$5.996 | +$739 |
+
+Edge bertahan di **kedua batas** asumsi → kesimpulan tidak bergantung pada asumsi urutan
+SL/TP intra-candle. Angka laporan tetap memakai batas pesimis.
+
+### 8.4 Reality-check risk 5% (V7T/V8T, periode utama)
+
+V7T: +$5.619 (DD 14,0%) — sangat bertahan; V8T: +$6.561 (DD 27,4%) — bertahan. Meski begitu
+rekomendasi tetap risk 1% (sampel kecil; 2022–23 masih minus).
+
+## 9. KESIMPULAN & REKOMENDASI (DIPERBARUI REV 2.1)
 
 1. **Permintaan pengguna terpenuhi**: analisa H1 → M30 → M15 → M5 dengan **eksekusi M5** penuh
    (entry di open candle M5 berikutnya, manajemen per candle, pesimis, spread riil, dua guard
    anti-optimis aktif) — 12 varian + kontrol acak + uji lintas rezim + reality-check.
-2. **Kandidat default DEMO berikutnya: V7 pada eksekusi M5** — H1 bias EMA200 → sweep PDH/PDL
-   fresh (jendela 2 bar) → CHoCH M15 → displacement/FVG M5 → eksekusi open candle M5.
-   87 tr/tahun, WR 65,5%, PF 1,28, +$896/tahun (risk 1%), DD 6,3%, 8/12 hijau, kumulatif
-   3 periode +$1.345. **V8** untuk preferensi frekuensi lebih tinggi.
-3. **Status: DEMO saja, risk maks 1%.** Alasan tidak naik ke live: 2022–23 masih −$287;
-   2021–22 setara acak; sampel kandidat kecil; definisi PDH/PDL dipilih pasca-melihat data
-   2025–26.
-4. Langkah berikut (satu per satu, gerbang sama): (a) grid jendela sweep PDH/PDL 2–24 jam di
-   eksekusi M5; (b) V7/V8 + filter tren SMA200-harian; (c) exit 2-tier; (d) uji sensitivitas
-   `tp_first` (varian optimis) untuk mengukur seberapa besar bias pesimisme memakan hasil.
+2. **Kandidat default DEMO berikutnya: V7T** — H1 bias EMA200 → sweep PDH/PDL fresh (jendela
+   2 bar) → CHoCH M15 → displacement/FVG M5 → **filter tren SMA200-harian** → eksekusi open
+   candle M5. 45 tr/tahun, WR 73,3%, PF 1,95, +$1.192/tahun (risk 1%), DD 3,1%, 8/11 hijau,
+   kumulatif 3 periode **+$1.668** (terbaik sepanjang seluruh seri tuning), 2021–22 jelas di
+   atas kontrol acak. Alternatif: **V7** (tanpa filter tren, ~7/bln, kumulatif +$1.345) dan
+   **V8T** (~12/bln, kumulatif +$1.389). W24h DITOLAK sebagai kandidat (rezim-specific).
+3. **Status: DEMO saja, risk maks 1%.** Alasan tidak naik ke live: 2022–23 masih −$171;
+   sampel kandidat sangat kecil (34–49 tr/tahun); definisi PDH/PDL dipilih pasca-melihat
+   data 2025–26 (risiko data-snooping); WR 73,3% pada n=45 masih bisa bergerak jauh.
+4. Langkah berikut (satu per satu, gerbang sama): (a) exit 2-tier untuk V7T (WR tinggi →
+   cocok untuk TP lebih dekat + runner); (b) uji EMA200-harian vs SMA200-harian pada V7T;
+   (c) validasi stabilitas seed kontrol acak (multi-seed); (d) forward-test DEMO 3 bulan
+   sebelum menilai ulang status live.
 
-## 9. REPRODUCIBILITY
+## 10. REPRODUCIBILITY
 
 ```
 # eksekusi M5 (default rev 2) — periode utama, 12 varian + kontrol acak
@@ -251,6 +321,15 @@ terlewati (2022–23 masih minus tipis).
 .venv/bin/python research/tuning_mtf.py --start 2025-09-01 --end "2026-09-01 23:59:59" \
     --risk 500 --variants V7,V8
 
+# [REV 2.1] grid jendela PDH/PDL + kombinasi filter tren (eksekusi M5)
+.venv/bin/python research/tuning_mtf.py --start 2025-09-01 --end "2026-09-01 23:59:59" \
+    --risk 100 --random \
+    --variants W10m,W30m,W1h,W2h,W4h,W8h,W12h,W24h,V7,V7T,V8,V8T
+
+# [REV 2.1] sensitivitas batas optimis (TP dulu saat sesama candle)
+.venv/bin/python research/tuning_mtf.py --start 2025-09-01 --end "2026-09-01 23:59:59" \
+    --risk 100 --variants V7,V7T,W24h --tp_first
+
 # unit test eksekusi M5 + regresi engine
 .venv/bin/python research/test_exec_m5.py
 .venv/bin/python research/test_antirepaint.py
@@ -258,8 +337,13 @@ terlewati (2022–23 masih minus tipis).
 
 Artefak angka (rev 2, M5): `reports/tuning_mtf_20250901_20260901_risk100_execm5.txt`,
 `..._risk500_execm5.txt`, `..._20210901_20220901_risk100_execm5.txt`,
-`..._20220901_20230901_risk100_execm5.txt`. Artefak rev 1 (M1): file `tuning_mtf_*.txt` tanpa
-suffix `_execm5`.
+`..._20220901_20230901_risk100_execm5.txt`. Artefak rev 2.1 (tuning lanjutan):
+`reports/tuning_mtf_pdgrid_20250901_20260901_risk100_execm5.txt` (grid jendela; baris
+V7T/V8T di file itu pra-fix — lihat catatan koreksi di dalamnya),
+`tuning_mtf_trendcombo_20250901_20260901_risk100_execm5.txt` (V7/V7T/V8/V8T/W24h + acak,
+post-fix), `tuning_mtf_trendcombo_2021.../2022...` (lintas rezim post-fix),
+`tuning_mtf_trendcombo_..._risk500_execm5.txt`, `tuning_mtf_tpfirst_...` (sensitivitas).
+Artefak rev 1 (M1): file `tuning_mtf_*.txt` tanpa suffix `_execm5`.
 
 Perubahan kode rev 2 (semua additif; default = perilaku lama; regresi hijau):
 - `research/backtest_m1_audit.py` — blok manajemen diekstrak menjadi closure `_manage(k)`;
@@ -267,3 +351,9 @@ Perubahan kode rev 2 (semua additif; default = perilaku lama; regresi hijau):
 - `research/tuning_mtf.py` — `exec_frame_from_m5()` + argumen `--exec {m5,m1}` (default m5);
   kedua flag QC otomatis ON saat `--exec m5`; nama artefak diberi suffix `_execm5`.
 - `research/test_exec_m5.py` — 6 unit test deterministik eksekusi M5 (semua PASS).
+- `research/backtest_m1_audit.py` [rev 2.1] — **fix bug gate `trend_filter` pada mode mtf**
+  (branch mtf kini jatuh ke gate filter sebelum return final, tanpa syarat sweep sesi);
+  varian tanpa filter terverifikasi tidak berubah (regresi angka identik + 24 anti-repaint PASS).
+- `research/tuning_mtf.py` [rev 2.1] — varian grid `W10m..W24h`, kombinasi `V7T/V8T`
+  (`trend_filter="sma200d"`, kolom via `add_filter_columns`), flag `--tp_first`,
+  lookup varian case-insensitive.

@@ -26,6 +26,8 @@ Varian ablasi (kontribusi tiap lapisan):
   V5/V6 = V1 dengan jendela sweep M30 1j/4j (makin lebar makin longgar)
   V7/V8 = V1 dengan likuiditas PDH/PDL kemarin (jendela 2 bar / 4 jam)
   V9/V10 = V1 dengan likuiditas fractal swing M30 (jendela 2 bar / 4 jam)
+  W10m..W24h = grid jendela sweep PDH/PDL (2..288 bar M5) — tuning lanjutan
+  V7T/V8T = V7/V8 + filter tren SMA200-harian (gabung dgn laporan tuning #4)
   A BASELINE       : engine lama (analisa M5 + sesi Asia/London, eksekusi M1)
                      — pembanding; inilah konsep semua laporan tuning sebelumnya.
   R RANDOM (--random) : entry acak geometri sama — kontrol untuk klaim edge.
@@ -53,7 +55,7 @@ from research.backtest_m1_period import (  # noqa: E402
     month_table, print_stats,
 )
 from research.tuning_trend_filter import (  # noqa: E402
-    find_files_for, month_brief,
+    find_files_for, month_brief, add_filter_columns,
 )
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -70,6 +72,20 @@ VARIANTS = {
     "V9": ("MTF FULL, fractal M30 (fresh)", {"mtf_m30_mode": "fract"}),
     "V10": ("MTF FULL, fractal M30 jendela 4 jam", {"mtf_m30_mode": "fract", "mtf_sweep_bars": 48}),
     "A":  ("BASELINE lama (M5+sesi, eksekusi M1)", {"signal_mode": "choch"}),
+    # ---- [TUNING LANJUTAN 08 Sep 2026, rev 2] ----
+    # Grid jendela sweep PDH/PDL (bar M5 = 5 menit waktu BURSA; 288 bar ~ 1 hari)
+    "W10m": ("PDH/PDL jendela 10 mnt (2 bar)", {"mtf_m30_mode": "pd", "mtf_sweep_bars": 2}),
+    "W30m": ("PDH/PDL jendela 30 mnt (6 bar)", {"mtf_m30_mode": "pd", "mtf_sweep_bars": 6}),
+    "W1h":  ("PDH/PDL jendela 1 jam (12 bar)", {"mtf_m30_mode": "pd", "mtf_sweep_bars": 12}),
+    "W2h":  ("PDH/PDL jendela 2 jam (24 bar)", {"mtf_m30_mode": "pd", "mtf_sweep_bars": 24}),
+    "W4h":  ("PDH/PDL jendela 4 jam (48 bar)", {"mtf_m30_mode": "pd", "mtf_sweep_bars": 48}),
+    "W8h":  ("PDH/PDL jendela 8 jam (96 bar)", {"mtf_m30_mode": "pd", "mtf_sweep_bars": 96}),
+    "W12h": ("PDH/PDL jendela 12 jam (144 bar)", {"mtf_m30_mode": "pd", "mtf_sweep_bars": 144}),
+    "W24h": ("PDH/PDL jendela 24 jam (288 bar)", {"mtf_m30_mode": "pd", "mtf_sweep_bars": 288}),
+    # Kombinasi kaskade MTF + filter tren SMA200-harian (laporan tuning #4)
+    "V7T":  ("V7 + filter tren SMA200-harian", {"mtf_m30_mode": "pd", "trend_filter": "sma200d"}),
+    "V8T":  ("V8 + filter tren SMA200-harian", {"mtf_m30_mode": "pd", "mtf_sweep_bars": 48,
+                                                "trend_filter": "sma200d"}),
 }
 
 
@@ -168,6 +184,9 @@ def main():
     ap.add_argument("--random", action="store_true",
                     help="tambah baseline entry ACAK sebagai kontrol (n = varian teramai)")
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--tp_first", action="store_true",
+                    help="varian OPTIMIS: TP diuji sebelum SL saat keduanya tersentuh "
+                         "di bar yang sama (sensitivitas bias pesimis [A5])")
     ap.add_argument("--guard", type=float, default=1.20)
     ap.add_argument("--capital", type=float, default=10_000.0)
     ap.add_argument("--out", default=None)
@@ -190,6 +209,8 @@ def main():
     m1 = m1[~m1.index.duplicated(keep="first")].sort_index()
     m1 = session_levels_norepaint(m1)
     m5 = add_mtf_columns(resample_m5(m1))
+    # kolom filter tren (SMA/EMA200 harian kemarin + EMA200-M5) utk varian V7T/V8T
+    m5 = add_filter_columns(m5)
     m5w = m5[m5.index >= pd.Timestamp(args.start)]
     E(f"Bar M1/M5     : {len(m1):,} / {len(m5w):,} (hari bursa M5: {m5w.index.normalize().nunique()})")
     E(f"Harga periode : {m5w['low'].min():,.2f} .. {m5w['high'].max():,.2f}")
@@ -223,19 +244,27 @@ def main():
         E(f"Eksekusi      : M1 — {len(m1x):,} bar; entry di bar M1 pertama candle M5 berikutnya; "
           "SL/TP/trailing per bar M1")
 
-    codes = [c.strip().upper() for c in args.variants.split(",") if c.strip()]
+    vmap = {k.upper(): k for k in VARIANTS}      # lookup case-insensitive (W10m == W10M)
+    codes = []
+    for c in args.variants.split(","):
+        c = c.strip().upper()
+        if not c:
+            continue
+        if c not in vmap:
+            raise SystemExit(f"varian tidak dikenal: {c} (pilih dari {list(VARIANTS)})")
+        codes.append(vmap[c])
     strict = args.exec == "m5"
     meb = args.exec == "m5"     # candle eksekusi ikut diuji SL/TP (order broker aktif)
     results = []
     for code in codes:
-        if code not in VARIANTS:
-            raise SystemExit(f"varian tidak dikenal: {code} (pilih dari {list(VARIANTS)})")
         name, ov = VARIANTS[code]
         kw = {"risk_usd": args.risk, "max_spread_usd": args.guard,
               "strict_bar_open_entry": strict, "manage_entry_bar": meb, **ov}
-        kw.setdefault("signal_mode", "mtf" if code.startswith("V") else "choch")
+        kw.setdefault("signal_mode",
+                      "mtf" if code.startswith(("V", "W")) else "choch")
         cfg = dataclasses.replace(CFG_CURRENT, name=f"{code} — {name}", **kw)
-        st = run_backtest(m1x, m5, cfg, capital0=args.capital, trade_from=args.start)
+        st = run_backtest(m1x, m5, cfg, capital0=args.capital, trade_from=args.start,
+                          tp_first=args.tp_first)
         print_stats(st, f"{code} — {name} (risk ${args.risk:,.0f})", out)
         month_table(st["tdf"], f"{code} — {name}", out, capital0=args.capital)
         results.append((code, name, st))
@@ -247,7 +276,7 @@ def main():
                                    strict_bar_open_entry=strict,
                                    manage_entry_bar=meb)
         stR = run_backtest(m1x, m5, cfgR, capital0=args.capital, trade_from=args.start,
-                           random_seed=args.seed, n_random=n_ref)
+                           random_seed=args.seed, n_random=n_ref, tp_first=args.tp_first)
         print_stats(stR, f"BASELINE ACAK (n={n_ref}, risk ${args.risk:,.0f})", out)
         month_table(stR["tdf"], "BASELINE ACAK (kontrol)", out, capital0=args.capital)
         results.append(("R", f"RANDOM n={n_ref} (kontrol)", stR))

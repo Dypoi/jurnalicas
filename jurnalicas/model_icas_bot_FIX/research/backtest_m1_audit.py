@@ -326,11 +326,11 @@ def signal_at(m5: pd.DataFrame, i: int, cfg: StratCfg) -> str | None:
         trig_bull = (c > o) and (c > swing_h5 or bull_fvg)
         trig_bear = (c < o) and (c < swing_l5 or bear_fvg)
 
-        if bias_bull and sweep_buy and choch15_bull and trig_bull:
-            return "BUY"
-        if bias_bear and sweep_sell and choch15_bear and trig_bear:
-            return "SELL"
-        return None
+        # [FIX tuning-lanjutan 08 Sep 2026] jangan return di sini — biarkan gate
+        # trend_filter di bawah tetap berlaku untuk mode mtf (sebelumnya mode mtf
+        # return lebih awal sehingga V*T tanpa efek); return final mtf di ekor fungsi
+        bull_disp = bias_bull and sweep_buy and choch15_bull and trig_bull
+        bear_disp = bias_bear and sweep_sell and choch15_bear and trig_bear
     else:
         bull_fvg = row["low"] > m5["high"].iat[i - 2] + 0.30
         bear_fvg = row["high"] < m5["low"].iat[i - 2] - 0.30
@@ -353,6 +353,14 @@ def signal_at(m5: pd.DataFrame, i: int, cfg: StratCfg) -> str | None:
         if not (c < ma):
             bear_disp = False
 
+    if mode == "mtf":
+        # kaskade MTF: likuiditas sudah dicek di lapis L2 (M30/PD) — TANPA
+        # syarat sweep sesi Asia/London (itu milik mode choch/cisd)
+        if bull_disp:
+            return "BUY"
+        if bear_disp:
+            return "SELL"
+        return None
     if (m5["low"].iat[i - 1] <= ssl or m5["low"].iat[i - 2] <= ssl) and bull_disp:
         return "BUY"
     if (m5["high"].iat[i - 1] >= bsl or m5["high"].iat[i - 2] >= bsl) and bear_disp:
