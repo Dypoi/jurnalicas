@@ -132,6 +132,19 @@ class IcasConfig:
     JOURNAL_HEALTH_FILE: str = "logs/trade_journal.health.json"
 
     # ============================================================================
+    # [AUDIT FORENSIK 3 — 08 Sep 2026] INTEGRITAS JURNAL SAAT ERROR / PUTUS KONEKSI
+    # ============================================================================
+    # A3-06: fsync setiap event jurnal (biaya ~ms; melindungi event terakhir —
+    #        justru tp_hit/position_closed — dari hilang saat power-loss).
+    JOURNAL_FSYNC: bool = True
+    # A3-03: PnL penutupan yang gagal diambil (riwayat deal flaky tepat saat
+    #        konfirmasi tutup) di-retry di latar belakang dan ditulis sebagai
+    #        event position_closed_pnl_backfill — PF/net di dashboard tidak
+    #        lagi "bolong" gara-gara satu pembacaan gagal.
+    JOURNAL_PNL_BACKFILL_INTERVAL_SECONDS: int = 30   # 0 = tiap siklus; negatif = nonaktif
+    JOURNAL_PNL_BACKFILL_MAX_ATTEMPTS: int = 120      # ~1 jam @ interval 30 dtk
+
+    # ============================================================================
     # [ENGINE BARU v2 "SWING-150" — 25 Agu 2026] Identitas + Jurnal Observasi JSON
     # ============================================================================
     ENGINE_VERSION: str = "icas-v2-swing150-c (kalibrasi 25 Agu 2026)"

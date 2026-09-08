@@ -371,9 +371,24 @@ class IcasMT5Bridge:
     def get_latest_m5_candles(self, count: int = 150) -> pd.DataFrame:
         """
         Fetches live real-time M5 candles directly from MT5 terminal.
+
+        [AUDIT FORENSIK 3 — A3-01] BUG LAMA: bila copy_rates_from_pos() gagal
+        (terminal baru start / koneksi broker goyah / history belum sync),
+        kode jatuh ke CSV statis repo `data/historical/xauusd_m5.csv` — file
+        yang berhenti di 2026-07-13 (harga ~$4011 padahal pasar ~$4600).
+        Daemon lalu MENGEVALUASI SINYAL pada bar terakhir data 2-bulan lalu dan
+        bisa mengirim order live sungguhan berdasarkan pasar yang sudah tidak ada.
+        Kini: mode LIVE yang gagal mengambil candle mengembalikan DataFrame
+        KOSONG (siklus di-skip, aman) — fallback CSV hanya berlaku untuk mode
+        simulasi (paket MetaTrader5 tidak terpasang).
         """
         if MT5_AVAILABLE and self.connected:
-            rates = mt5.copy_rates_from_pos(self.resolved_symbol, mt5.TIMEFRAME_M5, 0, count)
+            rates = None
+            try:
+                rates = mt5.copy_rates_from_pos(self.resolved_symbol, mt5.TIMEFRAME_M5, 0, count)
+            except Exception as e:                      # IPC rusak — jangan biarkan raise
+                logger.warning(f"copy_rates_from_pos gagal: {e}")
+                rates = None
             if rates is not None and len(rates) > 0:
                 df = pd.DataFrame(rates)
                 df['time'] = pd.to_datetime(df['time'], unit='s')
@@ -383,6 +398,10 @@ class IcasMT5Bridge:
                     df.loc[df.index[-1], 'high'] = max(df.loc[df.index[-1], 'high'], tick['bid'])
                     df.loc[df.index[-1], 'low'] = min(df.loc[df.index[-1], 'low'], tick['bid'])
                 return df
+            logger.warning("⚠️ Candle M5 live tidak tersedia (terminal belum sync / "
+                           "koneksi gangguan) — sinyal DILEWATI siklus ini. Fallback CSV "
+                           "statis DIMATIKAN di mode live demi keamanan sinyal.")
+            return pd.DataFrame()
 
         csv_path = "data/historical/xauusd_m5.csv"
         try:
@@ -582,9 +601,29 @@ class IcasMT5Bridge:
         return self.active_position
 
     def send_order(self, order_type: str, lot_size: float, sl_price: float, tp_price: Optional[float] = None) -> Optional[int]:
-        if self.has_open_positions():
-            logger.warning("Order rejected by Mutex Lock: Another position is already active.")
-            return None
+        # ---- [AUDIT FORENSIK 3 — A3-02b] Mutex WAJIB terverifikasi ----
+        # Bug lama: has_open_positions() memperlakukan positions_get()==None
+        # (IPC error) sama dengan "tidak ada posisi" → mutex LOLOS tepat pada
+        # kondisi paling berbahaya (koneksi goyah / terminal belum sync),
+        # sehingga posisi kedua bisa terbuka walau posisi pertama masih hidup.
+        # Kini: status posisi yang TIDAK DIKETAHUI = order DITOLAK.
+        if not MT5_AVAILABLE or not self.connected:
+            if self.active_position is not None:
+                logger.warning("Order rejected by Mutex Lock: Another position is already active.")
+                return None
+        else:
+            try:
+                positions = mt5.positions_get(symbol=self.resolved_symbol)
+            except Exception as e:
+                logger.warning(f"positions_get gagal saat verifikasi mutex: {e}")
+                positions = None
+            if positions is None:
+                logger.error("❌ Order DITOLAK: status posisi tidak diketahui (IPC error) — "
+                             "mutex tidak bisa diverifikasi. Entry ditunda ke polling berikutnya.")
+                return None
+            if len([p for p in positions if p.magic == self.magic_number]) > 0:
+                logger.warning("Order rejected by Mutex Lock: Another position is already active.")
+                return None
 
         tick = self.get_current_tick()
         # [AUDIT FORENSIK 2 — F-04] Feed mati mengembalikan spread 0.0 sehingga

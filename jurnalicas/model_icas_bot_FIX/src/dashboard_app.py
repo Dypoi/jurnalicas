@@ -20,6 +20,7 @@ import numpy as np
 import datetime
 import json
 import os
+import time
 from config import config
 from src.indicators.sessions import calculate_session_killzones, is_current_in_burst
 from src.strategy.icas_strategy import ModelIcasStrategy
@@ -151,9 +152,16 @@ def journal_summary(days: int = 7):
     last_closed_by_ticket = {}
     any_closed_by_ticket = {}
     for e in evs:
-        if e.get("event") in ("position_closed", "position_closed_offline"):
+        ev_name = e.get("event")
+        if ev_name in ("position_closed", "position_closed_offline"):
             tk = str(e.get("ticket"))
             any_closed_by_ticket[tk] = e
+            if isinstance(e.get("realized_total"), (int, float)):
+                last_closed_by_ticket[tk] = e
+        elif ev_name == "position_closed_pnl_backfill":
+            # [AUDIT 3 — A3-03] PnL yang dulu gagal dibaca kini dikirim ulang
+            # oleh daemon — jadikan sumber terakhir (paling lengkap) per tiket.
+            tk = str(e.get("ticket"))
             if isinstance(e.get("realized_total"), (int, float)):
                 last_closed_by_ticket[tk] = e
     n_closed = len(any_closed_by_ticket)
@@ -191,7 +199,8 @@ def _stats_from_journal():
         if ev == "order_open":
             tr["time"] = e.get("ts", ""); tr["type"] = e.get("type")
         elif ev == "tp_hit":
-            tr[f"tp{e.get('level')}"] = True
+            if e.get("level") in (1, 2, 3):        # [A3-09] jaga kunci tetap valid
+                tr[f"tp{e.get('level')}"] = True
         elif ev == "be_lock":
             tr["be_set"] = True
         elif ev == "trail_update":
@@ -205,6 +214,11 @@ def _stats_from_journal():
                     tr[k] = True
             if e.get("trail_step"):
                 tr["trail_step"] = max(tr["trail_step"], int(e.get("trail_step")))
+            if isinstance(e.get("realized_total"), (int, float)):
+                tr["pnl"] = float(e["realized_total"])
+        elif ev == "position_closed_pnl_backfill":
+            # [AUDIT 3 — A3-03] PnL retroaktif: melengkapi/mengoreksi close yang
+            # dulu tercatat tanpa realized_total (riwayat deal flaky saat itu).
             if isinstance(e.get("realized_total"), (int, float)):
                 tr["pnl"] = float(e["realized_total"])
 
@@ -372,6 +386,33 @@ def get_backtest_summary():
         
     return _cached_trades, _cached_stats
 
+def _read_state_positions() -> dict:
+    """[AUDIT 3 — A3-04] Baca snapshot state daemon (READ-ONLY) untuk flag
+    TP/BE/trailing posisi aktif.
+
+    Dashboard berjalan di proses terpisah dari daemon; bridge miliknya sendiri
+    tidak pernah merge StateStore, sehingga SEBELUM fix ini badge TP1/TP2/TP3/
+    BE/trailing di panel posisi aktif SELALU "pending" — menyesatkan justru
+    saat sesi on/off laptop (posisi diadopsi ulang). Sumber kebenaran flag
+    manajemen adalah state/icas_state.json yang ditulis daemon tiap siklus.
+
+    Retry singkat menutup race os.replace (sharing violation di Windows).
+    """
+    path = getattr(config, "STATE_FILE", "state/icas_state.json")
+    for _ in range(3):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data.get("positions", {}) or {}
+            return {}
+        except FileNotFoundError:
+            return {}
+        except (OSError, json.JSONDecodeError):
+            time.sleep(0.02)
+    return {}
+
+
 @app.route('/')
 def index():
     return render_template('index.html', symbol=config.SYMBOL, risk_pct=config.RISK_PER_TRADE_PCT*100)
@@ -402,6 +443,9 @@ def api_status():
 
     pos_data = None
     if pos is not None:
+        # [A3-04] flag manajemen (tp1_hit/be_set/trail_step) diambil dari state
+        # daemon — bridge dashboard tidak mengetahuinya (proses terpisah).
+        st_snap = _read_state_positions().get(str(pos.get("ticket"))) or {}
         cur_price = tick["bid"] if pos["type"] == "BUY" else tick["ask"]
         ep = pos["price_open"]
         fav_usd = (cur_price - ep) if pos["type"] == "BUY" else (ep - cur_price)
@@ -416,11 +460,11 @@ def api_status():
             "sl": round(pos["sl"], 2),
             "fav_pips": fav_pips,
             "pnl_usd": pnl_usd,
-            "be_set": bool(pos.get("be_set", False)),
-            "tp1_hit": bool(pos.get("tp1_hit", False)),
-            "tp2_hit": bool(pos.get("tp2_hit", False)),
-            "tp3_hit": bool(pos.get("tp3_hit", False)),
-            "trail_step": int(pos.get("trail_step", 0))
+            "be_set": bool(st_snap.get("be_set", pos.get("be_set", False))),
+            "tp1_hit": bool(st_snap.get("tp1_hit", pos.get("tp1_hit", False))),
+            "tp2_hit": bool(st_snap.get("tp2_hit", pos.get("tp2_hit", False))),
+            "tp3_hit": bool(st_snap.get("tp3_hit", pos.get("tp3_hit", False))),
+            "trail_step": int(st_snap.get("trail_step", pos.get("trail_step", 0)) or 0)
         }
 
     return jsonify({
