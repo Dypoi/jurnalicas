@@ -61,10 +61,22 @@ class StratCfg:
     risk_usd: float = 500.0               # fixed $ risk per trade (5% dari $10k)
     # ---- [TUNING 08 Sep 2026] mode sinyal & filter tren (default = perilaku lama persis) ----
     signal_mode: str = "choch"            # "choch" (swing-break/FVG) | "cisd" (Change in State of Delivery)
+                                          # | "mtf" (kaskade H1->M30->M15->M5, eksekusi M1)
     trend_filter: str | None = None       # None | "sma200d" | "ema200d" | "ema200m5"
     #  Kolom yang harus ADA di m5 bila dipakai:
     #    cisd mode  -> "cisd_bull", "cisd_bear"   (level CISD, NaN = tidak ada)
     #    filter     -> "ma_sma200d" / "ma_ema200d" / "ma_ema200m5"
+    #    mtf mode   -> "h1_ema200", "m30_ssl", "m30_bsl", "pd_low", "pd_high",
+    #                  "m30_fsw", "m30_fsh", "m15_swing_h", "m15_swing_l"
+    #                  (kausal: nilai HTF hanya dari bar HTF yang SUDAH tertutup)
+    #  Ablasi lapisan MTF (default semua aktif):
+    mtf_h1: bool = True                   # lapisan bias H1 (EMA200 H1)
+    mtf_m30: bool = True                  # lapisan likuiditas M30 (sweep BSL/SSL mayor)
+    mtf_m15: bool = True                  # lapisan CHoCH M15
+    mtf_sweep_bars: int = 2               # jendela sweep M30 pada bar M5 (2 = bar i-1..i-2)
+    mtf_m30_mode: str = "swing24"         # definisi likuiditas M30: "swing24" (ekstrem 24j
+                                          # rolling) | "pd" (PDH/PDL kemarin) | "fract"
+                                          # (fractal swing 5-bar M30, konfirmasi +2 bar)
 
 
 CFG_CURRENT = StratCfg(name="A - PLAN SAAT INI (config.py)")
@@ -252,6 +264,62 @@ def signal_at(m5: pd.DataFrame, i: int, cfg: StratCfg) -> str | None:
         lvl_s = row.get("cisd_bear", np.nan)
         bull_disp = (c > o) and (not pd.isna(lvl_b)) and (c > lvl_b)
         bear_disp = (c < o) and (not pd.isna(lvl_s)) and (c < lvl_s)
+    elif mode == "mtf":
+        # ---- KASKADE MULTI-TIMEFRAME: H1 bias -> M30 likuiditas -> M15 CHoCH
+        # ---- -> M5 trigger presisi. Semua level HTF kausal (bar HTF yang sudah
+        # ---- tertutup SAAT bar M5 ini dievaluasi). Eksekusi tetap di M1.
+        need = ("h1_ema200", "m30_ssl", "m30_bsl", "pd_low", "pd_high",
+                "m30_fsw", "m30_fsh", "m15_swing_h", "m15_swing_l")
+        missing = [k for k in need if k not in m5.columns]
+        if missing:
+            raise ValueError(f"signal_mode='mtf' membutuhkan kolom {missing} di m5 "
+                             "(lihat research/tuning_mtf.py)")
+        # L1 — H1: bias arah (close vs EMA200 H1)
+        if getattr(cfg, "mtf_h1", True):
+            h1ma = row["h1_ema200"]
+            bias_bull = (not pd.isna(h1ma)) and (c > h1ma)
+            bias_bear = (not pd.isna(h1ma)) and (c < h1ma)
+        else:
+            bias_bull = bias_bear = True
+        # L2 — M30: sweep likuiditas mayor dalam jendela mtf_sweep_bars bar M5
+        # terakhir (default 2 = bar i-1..i-2). Definisi level per mtf_m30_mode:
+        #   swing24 = ekstrem 24j rolling | pd = PDH/PDL kemarin | fract = fractal M30
+        if getattr(cfg, "mtf_m30", True):
+            swb = max(1, int(getattr(cfg, "mtf_sweep_bars", 2) or 2))
+            m30mode = getattr(cfg, "mtf_m30_mode", "swing24")
+            lvlmap = {"swing24": ("m30_ssl", "m30_bsl"),
+                      "pd": ("pd_low", "pd_high"),
+                      "fract": ("m30_fsw", "m30_fsh")}
+            if m30mode not in lvlmap:
+                raise ValueError(f"mtf_m30_mode tidak dikenal: {m30mode}")
+            col_buy, col_sell = lvlmap[m30mode]
+            lvl_buy, lvl_sell = row[col_buy], row[col_sell]
+            lo_win = m5["low"].iloc[max(0, i - swb):i]
+            hi_win = m5["high"].iloc[max(0, i - swb):i]
+            sweep_buy = (not pd.isna(lvl_buy)) and bool((lo_win <= lvl_buy).any())
+            sweep_sell = (not pd.isna(lvl_sell)) and bool((hi_win >= lvl_sell).any())
+        else:
+            sweep_buy = sweep_sell = True
+        # L3 — M15: konfirmasi CHoCH (close menembus swing 5-bar M15)
+        if getattr(cfg, "mtf_m15", True):
+            sw15h, sw15l = row["m15_swing_h"], row["m15_swing_l"]
+            choch15_bull = (not pd.isna(sw15h)) and (c > sw15h)
+            choch15_bear = (not pd.isna(sw15l)) and (c < sw15l)
+        else:
+            choch15_bull = choch15_bear = True
+        # L4 — M5: trigger presisi (displacement candle + FVG/swing 5-bar M5)
+        bull_fvg = row["low"] > m5["high"].iat[i - 2] + 0.30
+        bear_fvg = row["high"] < m5["low"].iat[i - 2] - 0.30
+        swing_h5 = m5["high"].iloc[i - 6:i - 1].max()
+        swing_l5 = m5["low"].iloc[i - 6:i - 1].min()
+        trig_bull = (c > o) and (c > swing_h5 or bull_fvg)
+        trig_bear = (c < o) and (c < swing_l5 or bear_fvg)
+
+        if bias_bull and sweep_buy and choch15_bull and trig_bull:
+            return "BUY"
+        if bias_bear and sweep_sell and choch15_bear and trig_bear:
+            return "SELL"
+        return None
     else:
         bull_fvg = row["low"] > m5["high"].iat[i - 2] + 0.30
         bear_fvg = row["high"] < m5["low"].iat[i - 2] - 0.30

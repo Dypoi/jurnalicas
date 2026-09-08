@@ -56,6 +56,9 @@ def find_files_for(start: str, end: str):
 
 def month_table(tdf: pd.DataFrame, label: str, out: list, capital0: float = 10_000.0):
     E = lambda t="": (print(t), out.append(t))  # noqa: E731
+    if not len(tdf):
+        E(f"\n  RINCIAN BULANAN — {label}: TIDAK ADA TRADE.")
+        return
     s = pd.to_datetime(tdf["open_ts"])
     local = s.dt.tz_localize("UTC").dt.tz_convert(SERVER_TZ)
     month = local.dt.to_period("M").astype(str)
