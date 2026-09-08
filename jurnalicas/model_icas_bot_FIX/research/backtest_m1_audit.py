@@ -74,6 +74,17 @@ class StratCfg:
     mtf_m30: bool = True                  # lapisan likuiditas M30 (sweep BSL/SSL mayor)
     mtf_m15: bool = True                  # lapisan CHoCH M15
     mtf_sweep_bars: int = 2               # jendela sweep M30 pada bar M5 (2 = bar i-1..i-2)
+    strict_bar_open_entry: bool = False   # [QC eksekusi-M5] entry hanya bila posisi sudah
+                                          # flat SEBELUM bar eksekusi dibuka (blokir entry
+                                          # di bar yang sama dengan exit posisi lama —
+                                          # tanpa ini, mode bar-M5 bisa entry di open bar
+                                          # setelah mengetahui H/L bar itu = optimis)
+    manage_entry_bar: bool = False        # [QC eksekusi-M5] uji SL/TP juga pada bar
+                                          # eksekusi (entry di open bar; H/L bar itu
+                                          # terjadi setelah open — order SL/TP broker
+                                          # sudah aktif). Default False = perilaku lama
+                                          # (bar entry dikecualikan; di mode M1 hanya
+                                          # 1 menit, dikecilkan artinya).
     mtf_m30_mode: str = "swing24"         # definisi likuiditas M30: "swing24" (ekstrem 24j
                                           # rolling) | "pd" (PDH/PDL kemarin) | "fract"
                                           # (fractal swing 5-bar M30, konfirmasi +2 bar)
@@ -460,84 +471,96 @@ def run_backtest(m1: pd.DataFrame, m5: pd.DataFrame, cfg: StratCfg,
     per_day, consec, cur_day = 0, 0, None
     m1_day = m1["srv_date"].to_numpy()      # batas hari = tengah malam SERVER
 
+    strict = getattr(cfg, "strict_bar_open_entry", False)
+
+    def _manage(k: int) -> None:
+        """Manajemen posisi pada bar k: SL/TP bertingkat + trailing, pesimis [A5].
+        [QC eksekusi-M5] closure agar dapat dipanggil ULANG untuk bar eksekusi
+        saat cfg.manage_entry_bar=True — candle entry tidak boleh kebal SL/TP
+        karena order SL/TP sudah hidup di sisi broker sejak entry."""
+        nonlocal pos, capital, consec
+        d = pos.dir
+        if pos.pending_sl is not None:                    # [A6]
+            pos.sl = pos.pending_sl
+            pos.pending_sl = None
+        if d == 1:
+            pos.mfe = max(pos.mfe, hb[k] - pos.entry)
+            hit_sl = lb[k] <= pos.sl
+            hit_tp1 = (not pos.t1) and hb[k] >= pos.tp1
+            # [A5] SL diuji lebih dulu kecuali varian uji tp_first
+            if hit_sl and not (tp_first and hit_tp1):
+                trades.append(pos.book(pos.sl, "SL"))
+                capital += trades[-1]["pnl"]; eq.append(capital)
+                consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
+                pos = None
+            else:
+                if hit_tp1:
+                    pos.realized += _tier_pnl(pos, pos.tp1, cfg.r1)
+                    pos.t1 = pos.be = True
+                    pos.raise_sl(pos.entry)
+                if pos.t1 and not pos.t2 and hb[k] >= pos.tp2:
+                    pos.realized += _tier_pnl(pos, pos.tp2, cfg.r2)
+                    pos.t2 = True
+                if pos.t2 and not pos.t3 and hb[k] >= pos.tp3:
+                    pos.realized += _tier_pnl(pos, pos.tp3, cfg.r3)
+                    pos.t3 = True
+                    pos.raise_sl(pos.tp1)
+                if pos.remaining() <= 1e-9:
+                    lvl = pos.tp3 if pos.t3 else (pos.tp2 if pos.t2 else pos.tp1)
+                    trades.append(pos.book(lvl, "TP-FULL"))
+                    capital += trades[-1]["pnl"]; eq.append(capital)
+                    consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
+                    pos = None
+                if pos is not None:
+                    kk = int(pos.mfe // step_d)
+                    if kk >= 1 and kk > pos.trail:
+                        pos.raise_sl(pos.entry + (kk - 1) * step_d + lock_d)
+                        pos.trail = kk
+        else:
+            pos.mfe = max(pos.mfe, pos.entry - la[k])
+            hit_sl = ha[k] >= pos.sl
+            hit_tp1 = (not pos.t1) and la[k] <= pos.tp1
+            if hit_sl and not (tp_first and hit_tp1):
+                trades.append(pos.book(pos.sl, "SL"))
+                capital += trades[-1]["pnl"]; eq.append(capital)
+                consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
+                pos = None
+            else:
+                if hit_tp1:
+                    pos.realized += _tier_pnl(pos, pos.tp1, cfg.r1)
+                    pos.t1 = pos.be = True
+                    pos.raise_sl(pos.entry)
+                if pos.t1 and not pos.t2 and la[k] <= pos.tp2:
+                    pos.realized += _tier_pnl(pos, pos.tp2, cfg.r2)
+                    pos.t2 = True
+                if pos.t2 and not pos.t3 and la[k] <= pos.tp3:
+                    pos.realized += _tier_pnl(pos, pos.tp3, cfg.r3)
+                    pos.t3 = True
+                    pos.raise_sl(pos.tp1)
+                if pos.remaining() <= 1e-9:
+                    lvl = pos.tp3 if pos.t3 else (pos.tp2 if pos.t2 else pos.tp1)
+                    trades.append(pos.book(lvl, "TP-FULL"))
+                    capital += trades[-1]["pnl"]; eq.append(capital)
+                    consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
+                    pos = None
+                if pos is not None:
+                    kk = int(pos.mfe // step_d)
+                    if kk >= 1 and kk > pos.trail:
+                        pos.raise_sl(pos.entry - ((kk - 1) * step_d + lock_d))
+                        pos.trail = kk
+
     for k in range(n1):
+        pos_open_at_start = pos is not None     # [QC eksekusi-M5] utk strict_bar_open_entry
         if m1_day[k] != cur_day:
             cur_day = m1_day[k]
             per_day = 0
             consec = 0        # icas_strategy.reset_daily_stats_if_new_day()
 
         if pos is not None:
-            d = pos.dir
-            if pos.pending_sl is not None:                # [A6]
-                pos.sl = pos.pending_sl
-                pos.pending_sl = None
-            if d == 1:
-                pos.mfe = max(pos.mfe, hb[k] - pos.entry)
-                hit_sl = lb[k] <= pos.sl
-                hit_tp1 = (not pos.t1) and hb[k] >= pos.tp1
-                # [A5] SL diuji lebih dulu kecuali varian uji tp_first
-                if hit_sl and not (tp_first and hit_tp1):
-                    trades.append(pos.book(pos.sl, "SL"))
-                    capital += trades[-1]["pnl"]; eq.append(capital)
-                    consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
-                    pos = None
-                else:
-                    if hit_tp1:
-                        pos.realized += _tier_pnl(pos, pos.tp1, cfg.r1)
-                        pos.t1 = pos.be = True
-                        pos.raise_sl(pos.entry)
-                    if pos.t1 and not pos.t2 and hb[k] >= pos.tp2:
-                        pos.realized += _tier_pnl(pos, pos.tp2, cfg.r2)
-                        pos.t2 = True
-                    if pos.t2 and not pos.t3 and hb[k] >= pos.tp3:
-                        pos.realized += _tier_pnl(pos, pos.tp3, cfg.r3)
-                        pos.t3 = True
-                        pos.raise_sl(pos.tp1)
-                    if pos.remaining() <= 1e-9:
-                        lvl = pos.tp3 if pos.t3 else (pos.tp2 if pos.t2 else pos.tp1)
-                        trades.append(pos.book(lvl, "TP-FULL"))
-                        capital += trades[-1]["pnl"]; eq.append(capital)
-                        consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
-                        pos = None
-                    if pos is not None:
-                        kk = int(pos.mfe // step_d)
-                        if kk >= 1 and kk > pos.trail:
-                            pos.raise_sl(pos.entry + (kk - 1) * step_d + lock_d)
-                            pos.trail = kk
-            else:
-                pos.mfe = max(pos.mfe, pos.entry - la[k])
-                hit_sl = ha[k] >= pos.sl
-                hit_tp1 = (not pos.t1) and la[k] <= pos.tp1
-                if hit_sl and not (tp_first and hit_tp1):
-                    trades.append(pos.book(pos.sl, "SL"))
-                    capital += trades[-1]["pnl"]; eq.append(capital)
-                    consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
-                    pos = None
-                else:
-                    if hit_tp1:
-                        pos.realized += _tier_pnl(pos, pos.tp1, cfg.r1)
-                        pos.t1 = pos.be = True
-                        pos.raise_sl(pos.entry)
-                    if pos.t1 and not pos.t2 and la[k] <= pos.tp2:
-                        pos.realized += _tier_pnl(pos, pos.tp2, cfg.r2)
-                        pos.t2 = True
-                    if pos.t2 and not pos.t3 and la[k] <= pos.tp3:
-                        pos.realized += _tier_pnl(pos, pos.tp3, cfg.r3)
-                        pos.t3 = True
-                        pos.raise_sl(pos.tp1)
-                    if pos.remaining() <= 1e-9:
-                        lvl = pos.tp3 if pos.t3 else (pos.tp2 if pos.t2 else pos.tp1)
-                        trades.append(pos.book(lvl, "TP-FULL"))
-                        capital += trades[-1]["pnl"]; eq.append(capital)
-                        consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
-                        pos = None
-                    if pos is not None:
-                        kk = int(pos.mfe // step_d)
-                        if kk >= 1 and kk > pos.trail:
-                            pos.raise_sl(pos.entry - ((kk - 1) * step_d + lock_d))
-                            pos.trail = kk
+            _manage(k)
 
-        if pos is None and k in entries:
+        if pos is None and k in entries \
+           and not (strict and pos_open_at_start):
             if per_day < cfg.max_trades_per_day and consec < cfg.max_consec_losses \
                and capital > 0 and (tf is None or m1_day[k] >= tf):
                 sig = entries[k]
@@ -546,6 +569,12 @@ def run_backtest(m1: pd.DataFrame, m5: pd.DataFrame, cfg: StratCfg,
                 pos = Position(sig, fill, lots, cfg, t1[k])
                 pos.spread_entry = spr[k]
                 per_day += 1
+                if cfg.manage_entry_bar and pos is not None:
+                    # [QC eksekusi-M5] candle eksekusi ikut diuji SL/TP:
+                    # entry di OPEN candle, H/L-nya terjadi SETELAH open (kausal),
+                    # dan SL/TP broker sudah aktif — tanpa ini candle entry kebal
+                    # SL/TP selama 5 menit = optimis (kontrol acak membuktikannya).
+                    _manage(k)
 
     tdf = pd.DataFrame(trades)
     m5w = m5 if tf is None else m5[m5.index >= pd.Timestamp(trade_from)]

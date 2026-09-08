@@ -1,237 +1,247 @@
-# LAPORAN TUNING MULTI-TIMEFRAME — ANALISA H1 → M30 → M15 → M5, EKSEKUSI M1
+# LAPORAN TUNING MULTI-TIMEFRAME — ANALISA H1 → M30 → M15 → M5, EKSEKUSI M5 (REV 2)
 
-**Periode uji utama : 01-09-2025 → 01-09-2026 (XAUUSD, 674.431 bar M1, 313 hari bursa)**
+**Periode uji utama : 01-09-2025 → 01-09-2026 (XAUUSD, 674.431 bar M1 / 134.882 candle M5, 313 hari bursa)**
 **Uji lintas rezim : 2021–22 (bearish) dan 2022–23 (recovery)**
-**Engine : `research/backtest_m1_audit.py` (M1 bid/ask, anti-repaint, pesimis, spread riil, guard $1.20)**
-**Skrip : `research/tuning_mtf.py` — artefak angka: `model_icas_bot_FIX/reports/tuning_mtf_*.txt`**
-**Tanggal : 08 September 2026**
+**Engine : `research/backtest_m1_audit.py` (bid/ask, anti-repaint, pesimis, spread riil, guard $1.20)**
+**Skrip : `research/tuning_mtf.py` (`--exec m5`, default sejak rev ini) — artefak: `model_icas_bot_FIX/reports/tuning_mtf_*_execm5.txt`**
+**Revisi : 08 September 2026 — rev 1 = eksekusi M1; rev 2 = eksekusi M5 (instruksi pengguna: "eksekusinya di m5 jangan m1")**
 
 ---
 
 ## RINGKASAN EKSEKUTIF
 
-1. Konsep yang diminta — **analisa berlapis H1, M30, M15, M5 dengan eksekusi M1** — kini benar-benar
-   terimplementasi di jalur sinyal engine (`signal_mode="mtf"`), bukan sekadar tampilan dashboard.
-   Semua laporan tuning sebelumnya (termasuk `LAPORAN_TUNING_FILTER_TREN.md`) **belum** memakai
-   konsep ini (analisa M5 + sesi, eksekusi M1); laporan ini menggantinya.
-2. Hasil kaskade MTF **sangat bergantung pada definisi lapisan likuiditas M30** — bukan pada
-   jumlah lapisannya:
-   - Likuiditas **ekstrem-24-jam rolling** (V1/V5/V6): kaskade nyaris tak pernah terpenuhi
-     (V1 = 7 trade/setahun, PF 0.15) dan versi longgarnya tetap **rugi** (PF 0.66–0.88).
-   - Likuiditas **fractal swing M30** (V9/V10): flat sampai rugi (PF 0.93–1.01).
-   - Likuiditas **PDH/PDL kemarin** (V7/V8) — level ICT klasik: **satu-satunya kaskade MTF FULL
-     yang profit**: V7 = 93 tr, WR 63,4%, PF 1.19, +$682, DD 6,3%; V8 = 257 tr, WR 62,3%,
-     PF 1.09, +$963, DD 12,6% (risk 1%).
-3. **Kontrol acak** (entry acak, geometri identik, n=888 aktual): PF 0.92, −$3.389, DD 53,2%.
-   V7/V8 berada jauh di atas keberuntungan pada periode utama.
-4. **Uji lintas rezim (gerbang wajib) — V7/V8 LULUS KUMULATIF, TIDAK LULUS SERAGAM**:
-   2021–22: V7 +$736 / V8 +$337 (profit, tapi kontrol acak periode itu juga +$883 → di level
-   keberuntungan); 2022–23: V7 −$287 / V8 −$175 (rugi tipis). **Kumulatif 3 periode risk 1%:
-   V7 +$1.131, V8 +$1.125** — terbaik dari semua varian yang pernah diuji di seri tuning ini
-   (pembanding kumulatif: baseline A −$6.390; filter tren B −$1.209; D −$1.564).
-5. Reality-check risk 5%: V7 +$3.215 (DD 27,6%) masih bertahan; V8 +$4.541 tapi DD 51,0% —
-   tidak layak.
-6. **Rekomendasi**: adopsi **V8** (H1 bias EMA200 → sweep PDH/PDL ≤ 4 jam → CHoCH M15 →
-   displacement/FVG M5 → eksekusi M1) sebagai kandidat default **DEMO** berikutnya, risk maks 1%.
-   **Status tetap DEMO, bukan live** — keunggulan belum stabil antar rezim dan sampel kandidat
-   masih kecil (60–257 trade/tahun).
+1. Konsep analisa berlapis **H1 → M30 → M15 → M5** dipertahankan penuh; **eksekusi dipindah ke M5**
+   (rev 2, sesuai instruksi): sinyal dihitung pada candle M5 yang tertutup, **entry di OPEN candle
+   M5 berikutnya**, dan SL/TP/trailing dievaluasi **per candle M5** — replika bot yang hanya
+   "bangun" tiap 5 menit, dengan SL/TP tetap dianggap hidup di sisi broker.
+2. **Eksekusi M5 TIDAK menurunkan kualitas — justru membaik untuk varian konsep-sempurna:**
+   - **V7 (kaskade FULL, sweep PDH/PDL fresh)**: 87 tr | WR **65,5%** | PF **1,28** | **+$896** |
+     DD **6,3%** | 8/12 bulan hijau (M1-exec rev 1: PF 1,19, +$682).
+   - **V8 (PDH/PDL jendela 4 jam)**: 246 tr | WR 62,2% | PF 1,10 | +$963 | DD 12,7% (setara rev 1).
+   - Kontrol acak justru MEMBURUK di M5 (PF 0,89, −$4.618 vs 0,92 di M1) → perbaikan varian
+     bukan hadiah gratis dari mode eksekusi.
+3. **Dua jebakan metodologis ditemukan & diperbaiki SELAMA migrasi ke M5** (kontrol acak yang
+   tiba-tiba "profit" PF 1,27 adalah alarm yang mengekspos keduanya):
+   - **Optimisme entry-sesi-candle-sama**: posisi lama exit di tengah candle membuka slot entry
+     di candle yang sama dengan harga OPEN candle itu (= entry setelah mengetahui H/L candle).
+     Fix: `strict_bar_open_entry` — entry hanya bila posisi sudah flat sebelum candle eksekusi
+     dibuka.
+   - **Candle eksekusi kebal SL/TP**: posisi dibuka setelah blok manajemen bar, sehingga H/L
+     candle entry tak pernah diuji (di mode M1 eksenerasinya hanya 1 menit; di M5 jadi 5 menit
+     penuh — besar untuk SL $15). Fix: `manage_entry_bar` — candle eksekusi ikut diuji SL/TP
+     (pesimis, SL-dulu), karena order SL/TP broker memang aktif sejak entry.
+   - Keduanya diverifikasi unit-test deterministik (`research/test_exec_m5.py`, 6 PASS) +
+     regresi: `test_antirepaint.py` 24 PASS, dan run M1 **byte-identik** dengan artefak ter-commit.
+4. **Uji lintas rezim (M5-exec)**: 2021–22 V7 +$736 / V8 +$337 (namun kontrol acak periode itu
+   juga +$883 → tak terpisahkan dari keberuntungan); 2022–23 V7 −$287 / V8 −$70 (rugi tipis).
+   **Kumulatif 3 periode risk 1%: V7 +$1.345, V8 +$1.230** — keduanya melampaui versi M1-exec
+   (V7 +$1.131, V8 +$1.125) dan tetap satu-satunya keluarga varian yang kumulatif positif.
+5. Reality-check risk 5%: V7 +$4.224 (DD 28,6%) bertahan; V8 +$4.538 tapi DD 52,6% — tidak layak.
+6. **Rekomendasi**: kandidat default DEMO berikutnya = **V7 pada eksekusi M5** (frekuensi rendah,
+   ~7 entry/bulan, WR 65,5%, DD 6,3%), dengan **V8** sebagai alternatif frekuensi menengah
+   (~20/bulan). Risk maks 1%. **Status tetap DEMO** — 2022–23 masih rugi tipis dan sampel
+   kandidat kecil (60–246 trade/tahun).
 
 ---
 
-## 1. LATAR BELAKANG
+## 1. LATAR BELAKANG & RIWAYAT REVISI
 
-Pertanyaan pengguna (08 Sep 2026): *"semua tuning harus dengan konsep analisa pada H1, M30, M15,
-M5, eksekusi di M1 — apakah laporan (tuning filter tren) sudah dengan konsep ini?"*
-
-Jawaban yang sudah diberikan secara jujur: **BELUM**. Bukti: jalur sinyal semua laporan tuning
-sebelumnya hanya menganalisa M5 (swing 5-bar + range sesi Asia/London); `MACRO_TIMEFRAME` M15 di
-config hanya untuk tampilan dashboard; H1/M30 tidak ada sama sekali di jalur sinyal. Laporan ini
-menutup celah tersebut: seluruh eksperimen tuning di bawah memakai kaskade analisa multi-timeframe
-dengan eksekusi tetap di M1.
+- Permintaan pengguna (08 Sep 2026): semua tuning harus memakai **analisa H1, M30, M15, M5**.
+  Laporan-laporan tuning sebelumnya (termasuk `LAPORAN_TUNING_FILTER_TREN.md`) belum memenuhi
+  (analisa M5 + sesi saja). Rev 1 laporan ini mengimplementasikan kaskade tersebut dengan
+  eksekusi M1.
+- Instruksi lanjutan pengguna (rev ini): **"coba ubah, eksekusinya di M5 jangan M1"** — seluruh
+  eksperimen diulang dengan eksekusi M5; hasil M1 rev 1 dipertahankan sebagai pembanding.
 
 ## 2. METODOLOGI
 
-### 2.1 Kaskade empat lapis (semua kausal / tanpa lookahead antar-timeframe)
+### 2.1 Kaskade analisa (tidak berubah dari rev 1, semua kausal)
 
 | Lapis | TF | Peran | Definisi |
 |---|---|---|---|
-| L1 | **H1** | Bias arah | close vs **EMA200 H1** (hanya bar H1 yang sudah tertutup) |
-| L2 | **M30** | Likuiditas mayor | **sweep SSL/BSL** dalam jendela `mtf_sweep_bars` bar M5 terakhir. Tiga definisi level diuji: (a) `swing24` = ekstrem 24 jam rolling; (b) `pd` = **PDH/PDL kemarin**; (c) `fract` = fractal swing 5-bar M30 (konfirmasi +2 bar) |
+| L1 | **H1** | Bias arah | close vs **EMA200 H1** (bar H1 tertutup terakhir) |
+| L2 | **M30** | Likuiditas mayor | sweep SSL/BSL dalam jendela `mtf_sweep_bars`; 3 definisi level: ekstrem-24j rolling / **PDH-PDL kemarin** / fractal M30 |
 | L3 | **M15** | Struktur | **CHoCH** — close menembus swing high/low 5-bar M15 |
 | L4 | **M5** | Trigger | displacement candle + FVG ($0,30) / break swing 5-bar M5 |
-| EX | **M1** | Eksekusi | entry di bar M1 berikutnya; SL/TP/trailing dievaluasi per M1; BUY di ask, exit di bid (spread riil implisit) |
+| EX | **M5** | Eksekusi (rev 2) | entry di **OPEN candle M5 berikutnya**; SL/TP/trailing per candle M5; BUY di ask, exit di bid; pesimis [A5]: bila SL & TP tersentuh di candle yang sama → SL dihitung dulu |
 
-BUY = bias bull H1 **dan** sweep SSL (likuiditas di bawah diambil) **dan** CHoCH bull M15 **dan**
-trigger bull M5. SELL simetris. Pemetaan HTF→M5 memakai offset durasi penuh (`_map_htf`): nilai
-bar HTF hanya terbaca setelah bar itu tertutup. Kausalitas diverifikasi unit-check (lihat §3).
+### 2.2 Eksekusi M5 — bagaimana dieksekusi secara jujur
 
-### 2.2 Varian yang diuji (risk $100 = 1%, modal $10.000, guard spread $1.20)
+Frame eksekusi M5 dibangun dari candle M5 (ask OHLC diagregat EXACT per candle dari M1, bukan
+aproksimasi bid+spread), lalu **loop manajemen posisi engine yang sudah teraudit dijalankan
+apa adanya** pada frame itu — tidak ada duplikasi logika. Dua flag QC menyertai mode ini:
 
-| Kode | Konfigurasi |
-|---|---|
-| V1 | MTF FULL (H1+M30+M15+M5), likuiditas swing24, jendela sweep 2 bar (10 menit) |
-| V2 | tanpa lapis M15 (H1+M30+M5) |
-| V3 | tanpa lapis M30 (H1+M15+M5) |
-| V4 | H1+M5 saja (bias + trigger) |
-| V5/V6 | V1 dengan jendela sweep M30 1 jam / 4 jam |
-| V7 | MTF FULL, likuiditas **PDH/PDL**, jendela fresh (2 bar) |
-| V8 | MTF FULL, likuiditas **PDH/PDL**, jendela 4 jam |
-| V9/V10 | MTF FULL, likuiditas **fractal M30**, jendela 2 bar / 4 jam |
-| A | BASELINE lama (analisa M5 + sesi Asia/London, eksekusi M1) — pembanding |
-| R | **Kontrol acak**: waktu entry acak (n menyamai varian teramai), arah acak, geometri manajemen posisi identik |
+- `strict_bar_open_entry=True`: entry di blok candle k hanya bila posisi sudah flat SEBELUM
+  candle k dibuka (membunuh optimisme entry-sesi-candle-sama).
+- `manage_entry_bar=True`: setelah entry di open candle k, H/L candle k ikut diuji terhadap
+  SL/TP (order broker aktif sejak entry; tanpa ini candle entry kebal SL/TP selama 5 menit).
 
-## 3. BUG DITEMUKAN & DIPERBAIKI SELAMA EKSPERIMEN (transparansi QC)
+Di mode M1 (rev 1) kedua flag OFF = perilaku engine lama persis (diverifikasi byte-identik).
 
-1. **NaN massal kolom M30 (penyebab V1 awal = 0 trade)**: `rolling(48, min_periods=48)` pada bar
-   M30 hasil resample menghitung *slot waktu*, bukan *bar bursa* — bar weekend (NaN) memutus
-   rantai sehingga **tidak ada satu pun nilai SSL/BSL valid sepanjang setahun** (0 dari 71.128
-   bar M5). Fix: bar non-bursa di-drop sebelum rolling → SSL/BSL valid 71.128/71.128 bar.
-   *Pelajaran: kaskade "terlalu restriktif" yang pertama kali terlihat ternyata bug data, bukan
-   sifat strategi — diagnosis per-lapis menyelamatkan kita dari kesimpulan salah.*
-2. **Crash `month_table`** pada varian 0-trade (tdf kosong) → guard ditambahkan.
-3. **`dataclasses.replace()` kwarg dobel** pada varian A → fix konstruksi kwargs.
-4. **`mtf_sweep_bars` belum ter-wire** (hardcoded 2 bar) → di-wire ke `signal_at()`.
-5. Verifikasi setelah fix: unit-check kausalitas PDH/PDL (level kemarin statis intraday, tidak
-   pernah membaca hari berjalan) dan fractal M30 (level baru hanya muncul ≥ 90 menit setelah bar
-   fractal — sesuai waktu konfirmasi 2 bar M30) — **PASS**. Header laporan kini juga mencetak
-   validitas tiap kolom HTF agar bug senyap seperti ini tidak terulang.
-6. **Regresi jalur default**: `run_m1_compare_audit.py` dijalankan ulang penuh — artefak
-   `reports/m1_audit_compare_jan_jun_2026.txt` hasil run **identik byte-per-byte** dengan versi
-   ter-commit → perilaku engine lama tidak berubah sama sekali (semua perubahan additif).
+### 2.3 Varian (sama dengan rev 1)
 
-## 4. HASIL PERIODE UTAMA (01-09-2025 → 01-09-2026, risk 1%)
+V1 FULL swing24 | V2 tanpa M15 | V3 tanpa M30 | V4 H1+M5 | V5/V6 swing24 jendela 1j/4j |
+**V7 FULL PDH/PDL fresh** | **V8 FULL PDH/PDL 4 jam** | V9/V10 fractal M30 | A baseline lama |
+R **kontrol acak** (waktu & arah entry acak, geometri manajemen identik, n = varian teramai).
 
-| Varian | Tr | WR% | PF | Net $ | Exp $/tr | DD% | Entry/bln | Bulan hijau | BUY/SELL |
+## 3. BUG & JEBAKAN METODOLOGIS YANG DITEMUKAN (transparansi QC)
+
+Dari rev 1 (masih berlaku): NaN massal kolom M30 (rolling slot-waktu vs bar bursa → fix dropna),
+crash `month_table` 0-trade, kwarg dobel `dataclasses.replace`, wiring `mtf_sweep_bars`.
+
+Baru di rev 2 (migrasi eksekusi M5):
+
+1. **Kontrol acak "menang" (PF 1,27, +$8.619)** pada run M5 pertama → alarm metodologis.
+   Diagnosis berlapis menemukan dua sumber optimis (lihat §2.2) — keduanya kini di-guard flag,
+   dan setelah fix kontrol acak kembali ke **PF 0,89 / −$4.618** (di bawah 1, sebagaimana
+   mestinya entry tanpa edge). Angka rev 2 di laporan ini SELURUHNYA hasil run pasca-fix.
+2. **Unit test deterministik** `research/test_exec_m5.py` (6 PASS): (1) agregat ask = open M1
+   pertama per candle; (2) skenario TP1-lalu-SL dalam satu candle → M1 WIN vs M5 LOSS (pesimis
+   [A5] bekerja); (3) entry identik antar mode (waktu & harga); (4) `strict_bar_open_entry`
+   memblokir entry candle-sama-dengan-exit; (5) `manage_entry_bar` menghapus kekebalan candle
+   entry (skenario SL-terus-rally: tanpa flag WIN +$319, dengan flag LOSS −$105).
+3. **Regresi**: `test_antirepaint.py` 24 PASS / 0 FAIL; spot-check M1 (`--exec m1`, V7 Jan–Mar
+   2026) **byte-identik** sebelum vs sesudah refactor engine → jalur default tak berubah.
+
+## 4. HASIL PERIODE UTAMA (01-09-2025 → 01-09-2026, risk 1%, EKSEKUSI M5)
+
+| Varian | Tr | WR% | PF | Net $ | Exp $/tr | DD% | Entry/bln | Hijau | BUY/SELL |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| V1 FULL swing24 (10 mnt) | 7 | 42,9 | 0,15 | −357 | −51,00 | 3,6 | 1,4 | 2/5 | 3/4 |
-| V2 tanpa M15 | 100 | 56,0 | 0,80 | −933 | −9,33 | 12,7 | 8,3 | 5/12 | 58/42 |
-| V3 tanpa M30 | 1.473 | 58,9 | 1,02 | +1.414 | +0,96 | 27,2 | 113,3 | 8/13 | 785/688 |
-| V4 H1+M5 saja | 2.386 | 59,0 | 1,01 | +1.276 | +0,53 | 36,7 | 183,5 | 6/13 | 1248/1138 |
-| V5 swing24, jendela 1 j | 47 | 57,5 | 0,66 | −714 | −15,18 | 8,4 | 4,3 | 3/11 | 21/26 |
-| V6 swing24, jendela 4 j | 174 | 59,8 | 0,88 | −889 | −5,11 | 15,7 | 14,5 | 4/12 | 87/87 |
-| **V7 PDH/PDL (fresh)** | **93** | **63,4** | **1,19** | **+682** | **+7,34** | **6,3** | 7,8 | **8/12** | 47/46 |
-| **V8 PDH/PDL (4 jam)** | **257** | **62,3** | **1,09** | **+963** | **+3,75** | **12,6** | 21,4 | **8/12** | 136/121 |
-| V9 fractal M30 (fresh) | 112 | 59,8 | 0,93 | −355 | −3,17 | 13,3 | 9,3 | 6/12 | 61/51 |
-| V10 fractal M30 (4 jam) | 1.251 | 57,8 | 1,01 | +710 | +0,57 | 31,2 | 96,2 | 8/13 | 660/591 |
-| A BASELINE lama (M5) | 1.278 | 57,1 | 0,89 | **−6.557** | −5,13 | 65,6 | 98,3 | 3/13 | 598/680 |
-| R ACAK (kontrol, n=888) | 888 | 56,0 | 0,92 | −3.389 | −3,82 | 53,2 | 68,3 | 4/13 | 461/427 |
+| V1 FULL swing24 (10 mnt) | 6 | 50,0 | 0,20 | −252 | −42,00 | 2,5 | 1,2 | 3/5 | 3/3 |
+| V2 tanpa M15 | 98 | 56,1 | 0,81 | −849 | −8,66 | 11,7 | 8,2 | 4/12 | 58/40 |
+| V3 tanpa M30 | 1.383 | 59,2 | 1,07 | +4.125 | +2,98 | 20,0 | 106,4 | 8/13 | 767/616 |
+| V4 H1+M5 saja | 2.263 | 59,6 | 1,06 | +6.114 | +2,70 | 20,0 | 174,1 | 8/13 | 1214/1049 |
+| V5 swing24, jendela 1 j | 46 | 56,5 | 0,65 | −735 | −15,97 | 9,6 | 4,2 | 4/11 | 21/25 |
+| V6 swing24, jendela 4 j | 168 | 59,5 | 0,91 | −653 | −3,89 | 12,8 | 14,0 | 5/12 | 87/81 |
+| **V7 PDH/PDL (fresh)** | **87** | **65,5** | **1,28** | **+896** | **+10,30** | **6,3** | 7,2 | **8/12** | 45/42 |
+| **V8 PDH/PDL (4 jam)** | **246** | 62,2 | **1,10** | **+963** | +3,91 | 12,7 | 20,5 | 7/12 | 133/113 |
+| V9 fractal M30 (fresh) | 108 | 60,2 | 0,95 | −220 | −2,04 | 12,4 | 9,0 | 6/12 | 59/49 |
+| V10 fractal M30 (4 jam) | 1.175 | 58,2 | 1,07 | +3.429 | +2,92 | 21,9 | 90,4 | 8/13 | 644/531 |
+| A BASELINE lama (M5+sesi) | 1.234 | 57,9 | 0,92 | −4.195 | −3,40 | 42,0 | 94,9 | 5/13 | 579/655 |
+| R ACAK (kontrol, n=842 aktual) | 842 | 54,2 | 0,89 | −4.618 | −5,49 | 62,1 | 64,8 | 5/13 | 434/408 |
 
-Rincian bulanan V8: 8 dari 12 bulan hijau; bulan terburuk Nov-2025 (PF 0,34, −$965), terbaik
-Des-2025 (PF 3,05, +$862). V7: 8/12 hijau, frekuensi hanya 3–12 entry/bulan.
+Rincian bulanan V7 (M5): 8/12 hijau; terburuk Nov-25 (PF 0,13, −$546), terbaik Des-25
+(PF 5,02, +$422); tiga bulan terakhir (Jun–Agu 26) semua hijau. V8: 7/12 hijau, terburuk
+Nov-25 (−$965), terbaik Des-25 (+$862).
 
-## 5. PEMBACAAN KONTROL ACAK
+### 4.1 Perbandingan eksekusi M1 (rev 1) vs M5 (rev 2) — periode utama
 
-Pada periode utama, kontrol acak dengan geometri manajemen posisi identik menghasilkan PF 0,92
-(−$3.389). Artinya:
+| Varian | M1: PF / Net / DD | M5: PF / Net / DD | Efek M5 |
+|---|---|---|---|
+| V3 | 1,02 / +1.414 / 27,2% | **1,07 / +4.125 / 20,0%** | membaik |
+| V4 | 1,01 / +1.276 / 36,7% | **1,06 / +6.114 / 20,0%** | membaik |
+| V7 | 1,19 / +682 / 6,3% | **1,28 / +896 / 6,3%** | membaik |
+| V8 | 1,09 / +963 / 12,6% | 1,10 / +963 / 12,7% | setara |
+| V10 | 1,01 / +710 / 31,2% | **1,07 / +3.429 / 21,9%** | membaik |
+| A baseline | 0,89 / −6.557 / 65,6% | 0,92 / −4.195 / 42,0% | kurang buruk, tetap rugi |
+| R acak | 0,92 / −3.389 / 53,2% | **0,89 / −4.618 / 62,1%** | memburuk |
 
-- Geometri plan (SL150/TP bertingkat/trailing) **sendirian tidak menghasilkan uang** — konsisten
-  dengan semua laporan sebelumnya.
-- V7 (+$7,34/tr) dan V8 (+$3,75/tr) berada **di atas keberuntungan secara meyakinkan** pada
-  periode ini; V3/V4/V10 (+$0,5–1,0/tr) hanya **marginal** di atas acak; V1/V2/V5/V6/V9 dan
-  baseline A di bawah acak.
-- WR 63,4% (V7) adalah win-rate tertinggi dari semua varian yang pernah diuji di seri tuning
-  (bandingkan: filter tren B 59,7%, D 59,5%, baseline 57,1%).
+Pembacaan: entry M1 dan M5 **identik** (waktu & harga — lihat unit test [3]); perbedaan murni
+dari granularitas manajemen. Trailing yang hanya ter-ratchet sekali per candle (bukan tiap
+menit) membuat pemenang berjalan lebih jauh dan menahan kerugian lebih kecil — menguntungkan
+varian arah-menerus (V3/V4/V7/V10), tetapi TIDAK menguntungkan entry acak (R memburuk) —
+bukti efeknya selektif terhadap sinyal yang benar-benar mengikuti tren, bukan artefak mode.
 
-## 6. UJI LINTAS REZIM (gerbang anti self-deception)
+## 5. UJI LINTAS REZIM (EKSEKUSI M5, gerbang anti self-deception)
 
-### 6.1 Periode 2021–09 → 2022–09 (XAUUSD bearish/konsolidasi)
+### 5.1 Periode 2021–09 → 2022–09 (bearish/konsolidasi)
 
 | Varian | Tr | WR% | PF | Net $ | DD% |
 |---|---:|---:|---:|---:|---:|
 | V7 PDH/PDL fresh | 71 | 67,6 | 1,30 | +736 | 4,4 |
 | V8 PDH/PDL 4 jam | 123 | 64,2 | 1,07 | +337 | 7,6 |
-| V4 H1+M5 | 275 | 60,4 | 0,98 | −177 | 17,1 |
-| A baseline | 255 | 58,0 | 0,89 | −1.219 | 17,9 |
-| R ACAK (n=85 aktual) | 85 | 64,7 | **1,28** | **+883** | 7,6 |
+| V4 H1+M5 | 275 | 60,0 | 0,95 | −549 | 19,0 |
+| A baseline | 256 | 60,5 | 0,98 | −211 | 16,0 |
+| R ACAK | 85 | 64,7 | **1,28** | **+883** | 7,6 |
 
-**Peringatan penting**: pada periode ini kontrol acak juga profit (PF 1,28, +$883) — mesin acak
-sedang "beruntung" mengikuti gerakan besar 2022. V7 yang +$736 **tidak dapat dibedakan dari
-keberuntungan** di rezim ini. Klaim edge TIDAK boleh dibangun dari periode ini.
+Peringatan yang sama dengan rev 1: kontrol acak periode ini juga profit → V7/V8 di rezim ini
+tidak dapat dibedakan dari keberuntungan.
 
-### 6.2 Periode 2022–09 → 2023–09 (recovery)
+### 5.2 Periode 2022–09 → 2023–09 (recovery)
 
 | Varian | Tr | WR% | PF | Net $ | DD% |
 |---|---:|---:|---:|---:|---:|
 | V7 PDH/PDL fresh | 60 | 56,7 | 0,90 | −287 | 6,5 |
-| V8 PDH/PDL 4 jam | 113 | 60,2 | 0,96 | −175 | 8,0 |
-| V4 H1+M5 | 251 | 57,4 | 1,00 | −38 | 19,1 |
-| A baseline | 232 | 61,2 | **1,15** | **+1.386** | 11,2 |
-| R ACAK | 87 | 60,9 | 1,03 | +125 | 7,2 |
+| V8 PDH/PDL 4 jam | 112 | 60,7 | 0,98 | −70 | 7,9 |
+| V4 H1+M5 | 246 | 59,4 | 1,05 | +509 | 14,7 |
+| A baseline | 228 | 61,0 | **1,17** | **+1.612** | 10,2 |
+| R ACAK | 88 | 55,7 | 0,83 | −699 | 10,2 |
 
-Di rezim recovery justru baseline lama yang terbaik (konsisten dengan temuan laporan tuning
-filter tren). V7/V8 rugi tipis.
+V7 rugi tipis, V8 mendekati impas (lebih baik dari rev 1 yang −$175). Baseline lama kembali
+menjadi terbaik di rezim ini — pola "unggul-ulangan bergantian rezim" konsisten di semua
+eksperimen seri ini.
 
-### 6.3 Kumulatif tiga periode (risk 1%)
+### 5.3 Kumulatif tiga periode (risk 1%)
 
-| Varian | 2021–22 | 2022–23 | 2025–26 | **Kumulatif** |
-|---|---:|---:|---:|---:|
-| **V7** | +736 | −287 | +682 | **+1.131** |
-| **V8** | +337 | −175 | +963 | **+1.125** |
-| A baseline (dari laporan #4) | −1.219 | +1.386 | −6.557 | **−6.390** |
-| B SMA200-harian (laporan #4) | −1.070 | −537 | +398 | −1.209 |
-| D EMA200-M5 (laporan #4) | −2.259 | +207 | +488 | −1.564 |
+| Varian | 2021–22 | 2022–23 | 2025–26 | **Kumulatif M5** | Kumulatif M1 (rev 1) |
+|---|---:|---:|---:|---:|---:|
+| **V7** | +736 | −287 | +896 | **+1.345** | +1.131 |
+| **V8** | +337 | −70 | +963 | **+1.230** | +1.125 |
+| V4 (bukan konsep FULL) | −549 | +509 | +6.114 | +6.074 | — |
+| A baseline | −211 | +1.612 | −4.195 | **−2.794** | −6.390 |
+| B SMA200-harian (lap. #4) | −1.070 | −537 | +398 | −1.209 | — |
+| D EMA200-M5 (lap. #4) | −2.259 | +207 | +488 | −1.564 | — |
 
-V7/V8 adalah kandidat pertama yang **kumulatif positif** di ketiga periode uji — namun dengan
-dua catatan jujur: (a) kontribusi terbesar berasal dari periode 2025–26 di mana definisi
-likuiditas PDH/PDL dipilih (risiko *data snooping* — 3 definisi diuji, 1 menang di periode ini);
-(b) belum lulus gerbang "profit di setiap rezim" (2021–22 ≈ acak, 2022–23 rugi tipis).
+V7/V8 tetap satu-satunya keluarga varian **kumulatif positif** di semua rezim yang diuji, dan
+versi M5 melampaui versi M1. Catatan jujur yang sama: definisi PDH/PDL dipilih dari periode
+2025–26 (risiko data-snooping, 3 definisi diuji), dan gerbang "profit di SETIAP rezim" belum
+terlewati (2022–23 masih minus tipis).
 
-## 7. REALITY-CHECK RISK 5% (periode utama)
+## 6. REALITY-CHECK RISK 5% (periode utama, M5)
 
 | Varian | Net $ | DD% | Vonis |
 |---|---:|---:|---|
-| V7 | +3.215 | 27,6 | bertahan, DD masih wajar |
-| V8 | +4.541 | 51,0 | **tidak layak** (DD >50%) |
+| V7 | +4.224 | 28,6 | bertahan |
+| V8 | +4.538 | 52,6 | **tidak layak** |
 
-Risk 5% tetap tidak disarankan untuk varian apa pun; V8 secara khusus rentan karena bulan buruk
-(Nov-25, Apr-26) menggerus separuh modal.
+## 7. ANALISIS
 
-## 8. ANALISIS
+1. **Mengapa eksekusi M5 membaik untuk kaskade?** Entry identik dengan M1; yang berubah hanya
+   (a) pesimisme intra-candle lebih besar (SL-dulu saat SL & TP sesama candle) — ini
+   MENGURANGI performa; (b) trailing ratchet lebih lambat (sekali per candle) — pemenang tidak
+   dipangkas oleh retrace noise 1-menit. Net effect untuk varian momentum-arah: (b) >> (a).
+   Untuk entry acak efeknya terbalik (R memburuk) → kesimpulan: granularitas kasar M5
+   "menyaring" manajemen dari noise, dan hanya berguna bila arahnya benar.
+2. **V7 kini varian terbaik sepanjang seri tuning** (semua laporan): WR 65,5% tertinggi,
+   PF 1,28, exp +$10,30/tr (2,2× kontrol acak versi M5 searah negatif), DD 6,3% terendah,
+   8/12 bulan hijau, frekuensi 7 entry/bulan (sangat selektif — konsisten dengan konsep
+   "kualitas di atas kuantitas" dari kaskade 4 lapis).
+3. **Struktur bulanan V7 sehat**: setelah bulan terburuk (Nov-25), tidak ada bulan rugi
+   berturut >1; Jun–Agu 2026 (rezim volatil tinggi) semuanya hijau.
+4. **V8 tetap alternatif frekuensi menengah** (20,5 entry/bulan) dengan angka hampir setara
+   (PF 1,10, +$963) tetapi DD 2× V7 dan risk-5% tidak layak.
+5. **Ablasi tetap konsisten**: membuang lapis M30/M15 menaikkan frekuensi 15–25× tetapi
+   menurunkan kualitas ke level marginal (V3/V4 PF 1,06–1,07 vs kontrol acak 0,89 — masih
+   di atas acak tapi jauh di bawah V7/V8 per trade).
 
-1. **Lapisan M30 adalah pisau bermata dua.** Dengan definisi ekstrem-24-jam, kaskade AND empat
-   lapis nyaris mustahil terpenuhi (7 trade/tahun) — sweep "ekstrem 24 jam yang searah bias H1"
-   hampir kontradiktif: BUY menuntut harga di atas EMA200-H1 *serentak* dengan penembusan low
-   24 jam. Saat jendela dilebarkan (V5/V6), kondisi melonggar tetapi kualitas sinyal justru
-   turun (PF 0,66–0,88) karena sweep basi tidak lagi informasi segar.
-2. **PDH/PDL bekerja karena levelnya nyata dan diketahui semua partisipan.** Sweep level kemarin
-   adalah peristiwa likuiditas Mayor klasik ICT: stop-hunt di bawah/atas level harian, lalu
-   reversal dikonfirmasi CHoCH M15 dan trigger presisi M5. WR 63–67% + DD 6–13% konsisten di
-   dua periode berbeda (2025–26 dan 2021–22) — bukan artefak satu rezim bull.
-3. **Fractal M30 (V9/V10) menempati posisi tengah** — level swing lokal terlalu dekat dengan
-   harga sehingga sweep-nya murah (banyak noise), PF 0,93–1,01.
-4. **Ablasi lapisan**: membuang M30 (V3) atau M15+M30 (V4) menaikkan frekuensi 6–18× namun
-   menekan kualitas ke marginal-di-atas-acak. Kaskade lengkap dengan likuiditas yang tepat
-   (V7/V8) menukar frekuensi dengan kualitas — pola klasik "selectivity vs activity".
-5. **Perbandingan dengan kandidat laporan tuning #4** (periode utama): V8 vs B (SMA200 harian):
-   PF 1,09 vs 1,02; net +$963 vs +$398; DD 12,6% vs 24,6%; 21 vs 48 entry/bln — V8 mengungguli
-   di semua metrik, dan kumulatif 3 periode juga lebih baik (+$1.125 vs −$1.209).
+## 8. KESIMPULAN & REKOMENDASI
 
-## 9. KESIMPULAN & REKOMENDASI
+1. **Permintaan pengguna terpenuhi**: analisa H1 → M30 → M15 → M5 dengan **eksekusi M5** penuh
+   (entry di open candle M5 berikutnya, manajemen per candle, pesimis, spread riil, dua guard
+   anti-optimis aktif) — 12 varian + kontrol acak + uji lintas rezim + reality-check.
+2. **Kandidat default DEMO berikutnya: V7 pada eksekusi M5** — H1 bias EMA200 → sweep PDH/PDL
+   fresh (jendela 2 bar) → CHoCH M15 → displacement/FVG M5 → eksekusi open candle M5.
+   87 tr/tahun, WR 65,5%, PF 1,28, +$896/tahun (risk 1%), DD 6,3%, 8/12 hijau, kumulatif
+   3 periode +$1.345. **V8** untuk preferensi frekuensi lebih tinggi.
+3. **Status: DEMO saja, risk maks 1%.** Alasan tidak naik ke live: 2022–23 masih −$287;
+   2021–22 setara acak; sampel kandidat kecil; definisi PDH/PDL dipilih pasca-melihat data
+   2025–26.
+4. Langkah berikut (satu per satu, gerbang sama): (a) grid jendela sweep PDH/PDL 2–24 jam di
+   eksekusi M5; (b) V7/V8 + filter tren SMA200-harian; (c) exit 2-tier; (d) uji sensitivitas
+   `tp_first` (varian optimis) untuk mengukur seberapa besar bias pesimisme memakan hasil.
 
-1. **Pertanyaan pengguna terjawab tuntas**: tuning dengan konsep analisa H1/M30/M15/M5 +
-   eksekusi M1 sudah diimplementasikan, diuji (12 varian termasuk kontrol acak dan uji lintas
-   rezim), dan hasilnya di laporan ini. Konsep MTF **tidak otomatis lebih baik** — definisi
-   lapisan likuiditas yang menentukan; implementasi naif (ekstrem rolling) menghasilkan
-   7 trade/tahun dan rugi.
-2. **Kandidat baru terbaik: V8** — H1 bias EMA200 → sweep PDH/PDL (jendela ≤ 4 jam) → CHoCH M15
-   → displacement/FVG M5 → eksekusi M1. 257 tr/tahun, WR 62,3%, PF 1,09, +$963/tahun (risk 1%),
-   DD 12,6%, 8/12 bulan hijau, jauh di atas kontrol acak, kumulatif 3 periode positif.
-   V7 (versi fresh-sweep, 8 entry/bulan) untuk akun yang ingin frekuensi sangat rendah.
-3. **Status: DEMO saja, risk maks 1%.** Tiga alasan: sampel kandidat kecil (60–257 tr/tahun);
-   2021–22 tidak terpisah dari keberuntungan acak; 2022–23 rugi tipis. Jangan naik risk 5%.
-4. Langkah tuning berikutnya (satu per satu, gerbang lintas rezim yang sama): (a) V8 + filter
-   tren SMA200-harian (dua peredam rezim digabung — uji apakah saling menguatkan atau
-   mengganda-gandakan filter); (b) jendela sweep PDH/PDL antara 2–24 jam (grid); (c) exit
-   2-tier untuk menangkap WR tinggi.
-
-## 10. REPRODUCIBILITY
+## 9. REPRODUCIBILITY
 
 ```
-# periode utama (12 varian + kontrol acak, ~11 menit)
+# eksekusi M5 (default rev 2) — periode utama, 12 varian + kontrol acak
 .venv/bin/python research/tuning_mtf.py --start 2025-09-01 --end "2026-09-01 23:59:59" \
     --risk 100 --random
 
-# uji lintas rezim
+# eksekusi M1 (rev 1, pembanding)
+.venv/bin/python research/tuning_mtf.py --start 2025-09-01 --end "2026-09-01 23:59:59" \
+    --risk 100 --random --exec m1
+
+# uji lintas rezim (M5)
 .venv/bin/python research/tuning_mtf.py --start 2021-09-01 --end "2022-09-01 23:59:59" \
     --risk 100 --variants V7,V8,V4,A --random
 .venv/bin/python research/tuning_mtf.py --start 2022-09-01 --end "2023-09-01 23:59:59" \
@@ -241,19 +251,19 @@ Risk 5% tetap tidak disarankan untuk varian apa pun; V8 secara khusus rentan kar
 .venv/bin/python research/tuning_mtf.py --start 2025-09-01 --end "2026-09-01 23:59:59" \
     --risk 500 --variants V7,V8
 
-# regresi jalur default engine (harus identik byte-per-byte dgn artefak ter-commit)
-.venv/bin/python research/run_m1_compare_audit.py
+# unit test eksekusi M5 + regresi engine
+.venv/bin/python research/test_exec_m5.py
+.venv/bin/python research/test_antirepaint.py
 ```
 
-Artefak angka:
-- `model_icas_bot_FIX/reports/tuning_mtf_20250901_20260901_risk100.txt` (V1–V10 + A + R)
-- `model_icas_bot_FIX/reports/tuning_mtf_20210901_20220901_risk100.txt` (lintas rezim 1)
-- `model_icas_bot_FIX/reports/tuning_mtf_20220901_20230901_risk100.txt` (lintas rezim 2)
-- `model_icas_bot_FIX/reports/tuning_mtf_20250901_20260901_risk500.txt` (reality check)
+Artefak angka (rev 2, M5): `reports/tuning_mtf_20250901_20260901_risk100_execm5.txt`,
+`..._risk500_execm5.txt`, `..._20210901_20220901_risk100_execm5.txt`,
+`..._20220901_20230901_risk100_execm5.txt`. Artefak rev 1 (M1): file `tuning_mtf_*.txt` tanpa
+suffix `_execm5`.
 
-Perubahan kode (semua additif, default = perilaku lama, regresi hijau):
-- `research/backtest_m1_audit.py` — `signal_mode="mtf"`, flag ablasi `mtf_h1/mtf_m30/mtf_m15`,
-  `mtf_sweep_bars`, `mtf_m30_mode` (`swing24`|`pd`|`fract`).
-- `research/tuning_mtf.py` — skrip tuning MTF (kaskade kausal, 3 definisi likuiditas,
-  kontrol acak, cek validitas kolom HTF di header).
-- `research/backtest_m1_period.py` — guard `month_table` untuk varian 0-trade.
+Perubahan kode rev 2 (semua additif; default = perilaku lama; regresi hijau):
+- `research/backtest_m1_audit.py` — blok manajemen diekstrak menjadi closure `_manage(k)`;
+  flag baru `strict_bar_open_entry` & `manage_entry_bar` (default False).
+- `research/tuning_mtf.py` — `exec_frame_from_m5()` + argumen `--exec {m5,m1}` (default m5);
+  kedua flag QC otomatis ON saat `--exec m5`; nama artefak diberi suffix `_execm5`.
+- `research/test_exec_m5.py` — 6 unit test deterministik eksekusi M5 (semua PASS).
