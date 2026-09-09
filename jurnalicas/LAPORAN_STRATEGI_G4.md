@@ -199,6 +199,48 @@ Mengapa 50/30: grid riset menunjukkan frekuensi G4 + trailing cepat =
 kombinasi terbaik (WR 73% terjaga karena lock cepat memindahkan loss
 menjadi scratch/kecil-untung; profit hidup di runner ekor panjang).
 
+### 6a. Anatomi exit — kenapa TP bertingkat jarang tersentuh (dan kenapa itu by design)
+
+Data aktual G4 setahun: **trailing aktif di 73,0% trade**, sedangkan
+TP1/TP2/TP3 hanya **6,1% / 0,4% / 0,1%**; median perjalanan menguntungkan
+(MFE) trade = **$7,05 (~70 pips)**. Artinya di G4, exit engine-nya adalah
+**trailing**, bukan tangga TP — tangga TP hanyalah jaring pengaman untuk
+hari-hari outlier. Tiga penyebab struktural:
+
+1. **Matematika TP3**: 562,5 pips = perjalanan $56 tanpa retracement —
+   **5–8× lipat** perjalanan median trade. Setelah sweep-likuiditas,
+   gerakan pembalikan tipikal emas selesai dalam 30–90 menit (50–150 pips).
+   Hari trend monster yang menempuh 562,5 pips hanya ~0,1–2% trade.
+2. **Trailing 50/30 memotong lebih dulu**: pada MFE +100p SL sudah di +80,
+   +150p → SL +130 — pullback normal (yang hampir selalu datang) mengeluarkan
+   posisi **sebelum** TP1 187,5 tercapai. Itulah kenapa WR tetap 73% meski
+   TP1 cuma 6,1% — profit diambil trailing, bukan TP.
+3. Setelah TP1, engine menaikkan SL ke BE — runner butuh melanjutkan $37,5
+   lagi TANPA balik ke entry untuk TP2; probabilitas rendah di pasar noisy.
+
+**"Kalau TP-nya didekatkan biar sering tersentuh?" — SUDAH DIUJI, dan hasilnya merusak:**
+
+| Varian (setahun, risk 1%) | TP1/TP2/TP3 tersentuh | WR | PF | Net | Max DD |
+|---|---|---|---|---|---|
+| TP 50/100 (G3, scalp) | 72,4% / 39,4% / 0,1% | 72,4% | **0,91** | **−$3.763** | **51,7%** |
+| TP 100/200 (G1) | 60,3% / 27,3% / 0,1% | 60,3% | 1,05 | +$2.044 | 23,9% |
+| TP 125/250 (G2) | 44,2% / 16,0% / 0,1% | 61,1% | 1,07 | +$2.686 | 19,7% |
+| **G4: TP plan + trail 50/30** | 6,1% / 0,4% / 0,1% | **73,0%** | 1,12 | **+$4.493** | 19,5% |
+| W24h: TP plan + trail **100**/30 | **28,5% / 6,9% / 2,1%** | 61,2% | **1,15** | **+$5.257** | **12,4%** |
+
+Semakin dekat TP, semakin sering tersentuh — dan semakin kecil profit:
+G3 (TP paling dekat, tersentuh paling sering) justru **BUST −$3.763, DD 52%**.
+Kesimpulan riset: edge G4 hidup di **ekor runner** (menang besar sesekali)
+yang membayar semua loss kecil — memotong ekor = memotong sumber profit.
+
+**Dua varian teruji yang membuat tangga TP "hidup" lagi:** pelankan trailing
+ke 100/30 (preset W24h): TP1 28,5% / TP2 6,9% / TP3 2,1%, PF 1,15, net
++$5.257, DD hanya 12,4% — lebih besar profitnya, lebih kecil DD-nya, TAPI
+frekuensi turun 103 → 66 entry/bln dan WR turun 73% → 61%. Cukup ubah satu
+baris: `TRAILING_STEP_PIPS: 100.0`. Pilihan ini murni selera: frekuensi
+scalping tinggi + WR tinggi (G4) vs tangga TP bermakna + DD ringan (W24h).
+(Ref: `reports/tuning_scalpmtf_20250901_20260901_risk100_execm5.txt`.)
+
 ---
 
 ## 7. Profil sinyal aktual setahun (data, bukan asumsi)
