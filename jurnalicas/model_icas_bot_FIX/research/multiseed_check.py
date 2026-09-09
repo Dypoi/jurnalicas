@@ -37,7 +37,7 @@ from research.tuning_mtf import add_mtf_columns, exec_frame_from_m5, VARIANTS  #
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# kandidat yang diuji (nama varian tuning_mtf) — geometri diambil dari VARIANTS
+# kandidat default (nama varian tuning_mtf) — geometri diambil dari VARIANTS
 CANDIDATES = ("V7T", "V7E", "V7TA", "V7TD")
 
 
@@ -49,8 +49,11 @@ def main():
     ap.add_argument("--guard", type=float, default=1.20)
     ap.add_argument("--capital", type=float, default=10_000.0)
     ap.add_argument("--seeds", type=int, default=24)
+    ap.add_argument("--candidates", default=",".join(CANDIDATES),
+                    help="kode varian tuning_mtf yang diuji, dipisah koma")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
+    candidates = tuple(c.strip() for c in args.candidates.split(",") if c.strip())
 
     out: list[str] = []
     E = lambda t="": (print(t), out.append(t))  # noqa: E731
@@ -72,7 +75,7 @@ def main():
     E("-" * 130)
 
     rng_seeds = list(range(1, args.seeds + 1))
-    for code in CANDIDATES:
+    for code in candidates:
         if code not in VARIANTS:
             raise SystemExit(f"varian tidak dikenal: {code}")
         name, ov = VARIANTS[code]

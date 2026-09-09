@@ -371,7 +371,7 @@ def signal_at(m5: pd.DataFrame, i: int, cfg: StratCfg) -> str | None:
 # --------------------------------------------------------------------------- #
 class Position:
     __slots__ = ("dir", "entry", "lots", "sl", "tp1", "tp2", "tp3",
-                 "t1", "t2", "t3", "mfe", "realized", "trail", "be",
+                 "t1", "t2", "t3", "mfe", "mae", "realized", "trail", "be",
                  "open_ts", "spread_entry", "pending_sl", "cfg")
 
     def __init__(self, sig, fill, lots, cfg: StratCfg, ts):
@@ -384,6 +384,7 @@ class Position:
         self.tp3 = fill + d * cfg.tp3_pips * PIP
         self.t1 = self.t2 = self.t3 = self.be = False
         self.mfe = 0.0
+        self.mae = 0.0   # [QC scalp 09 Sep 2026] excursi adverse maksimum (negatif)
         self.realized = 0.0
         self.trail = 0
         self.open_ts = ts
@@ -416,6 +417,7 @@ class Position:
         return {"open_ts": self.open_ts, "type": "BUY" if self.dir == 1 else "SELL",
                 "pnl": round(pnl, 2), "res": res, "reason": reason,
                 "mfe": round(self.mfe, 3), "mfe_pips": round(self.mfe / PIP, 1),
+                "mae": round(self.mae, 3), "mae_pips": round(-self.mae / PIP, 1),
                 "tp1": self.t1, "tp2": self.t2, "tp3": self.t3,
                 "trail": self.trail, "be": self.be, "lots": self.lots,
                 "spread_entry": round(self.spread_entry, 3),
@@ -493,6 +495,7 @@ def run_backtest(m1: pd.DataFrame, m5: pd.DataFrame, cfg: StratCfg,
             pos.pending_sl = None
         if d == 1:
             pos.mfe = max(pos.mfe, hb[k] - pos.entry)
+            pos.mae = min(pos.mae, lb[k] - pos.entry)
             hit_sl = lb[k] <= pos.sl
             hit_tp1 = (not pos.t1) and hb[k] >= pos.tp1
             # [A5] SL diuji lebih dulu kecuali varian uji tp_first
@@ -526,6 +529,7 @@ def run_backtest(m1: pd.DataFrame, m5: pd.DataFrame, cfg: StratCfg,
                         pos.trail = kk
         else:
             pos.mfe = max(pos.mfe, pos.entry - la[k])
+            pos.mae = min(pos.mae, pos.entry - ha[k])
             hit_sl = ha[k] >= pos.sl
             hit_tp1 = (not pos.t1) and la[k] <= pos.tp1
             if hit_sl and not (tp_first and hit_tp1):
