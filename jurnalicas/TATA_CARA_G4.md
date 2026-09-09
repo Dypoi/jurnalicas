@@ -88,6 +88,35 @@ pip install MetaTrader5
 > NB: perintah berantai `&&` hanya jalan di **CMD** / PowerShell 7+. Di
 > PowerShell lama, jalankan perintah satu per satu.
 
+### 3a. Memperbarui clone yang SUDAH ADA (jangan clone ulang!)
+
+Saat ada commit baru di repo, cukup tarik perubahannya — venv, kredensial,
+dan konfigurasi lokal **tidak tersentuh** (tidak ada instalasi ulang):
+
+```bat
+:: hentikan dulu dashboard/bot yang sedang jalan (Ctrl+C di jendelanya)
+
+cd jurnalicas
+git pull
+
+:: cek pembaruan sampai:
+git log --oneline -3
+```
+
+(Contoh: setelah audit dashboard, commit teratas harus
+`313830c Audit forensik dashboard: 11 bug (D6-01..D6-11)...`.)
+
+Verifikasi opsional di mesin Anda (aman — jurnal asli di-backup otomatis):
+
+```bat
+cd model_icas_bot_FIX
+.venv\Scripts\activate
+python verify_dashboard_v3.py      :: harus 40 PASS / 0 FAIL
+```
+
+Clone ulang penuh hanya diperlukan bila folder clone lama hilang/korup, atau
+memasang di komputer lain. Git akan menolak clone ke folder yang sudah ada.
+
 File penting:
 
 | File | Peran |
