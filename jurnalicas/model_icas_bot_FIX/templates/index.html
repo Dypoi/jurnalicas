@@ -186,6 +186,7 @@
                 <span class="pos-stat-label">Running Profit</span>
                 <span class="pos-stat-val val-green" id="pos-running-pnl">+0.0 pips (+$0.00)</span>
             </div>
+            <div style="width: 100%; font-size: 10.5px; color: var(--text-sub);" id="pos-reason"></div>
             <div style="display: flex; gap: 6px;" id="pos-milestones">
                 <span id="badge-be" class="badge badge-gold">BE+ PENDING</span>
                 <span id="badge-tp1" class="badge badge-blue">TP1 (1:1) PENDING</span>
@@ -199,8 +200,10 @@
             <div class="chart-box">
                 <div class="chart-header">
                     <div class="chart-title">📊 XAUUSD M5 Price Action & 4-Tier Target Tracker</div>
-                    <div style="font-size: 11px; color: var(--text-sub);" id="chart-info">
-                        🟡 Garis Kuning = Live Bid Price | 🟢 FVG Bull | 🔴 FVG Bear
+                    <div style="font-size: 11px; color: var(--text-sub); display: flex; gap: 10px; align-items: center;" id="chart-info">
+                        <span class="badge badge-live" id="chart-live-badge">● LIVE</span>
+                        <span>⏱ Bar M5 tutup: <strong id="chart-m5-countdown" style="color: var(--gold);">--:--</strong></span>
+                        <span>🟡 Garis Kuning = Live Bid | 🟢 FVG Bull | 🔴 FVG Bear | 🥇 PDH/PDL</span>
                     </div>
                 </div>
                 <canvas id="candleChart"></canvas>
@@ -215,6 +218,22 @@
                     <div class="info-row"><span class="info-label">L3 · Struktur</span><span class="info-val">CHoCH swing 5-bar M15</span></div>
                     <div class="info-row"><span class="info-label">L4 · Trigger</span><span class="info-val" id="g4-l4">…</span></div>
                     <div class="info-row"><span class="info-label">Guard Spread Entry</span><span class="info-val val-green" id="g4-guard">…</span></div>
+                </div>
+
+                <!-- [D6-12] Kenapa (Belum) Entry — bloker + checklist kaskade live -->
+                <div class="panel-box" id="why-panel" style="display: none;">
+                    <div class="panel-title">🎯 Kenapa (Belum) Entry</div>
+                    <div id="why-status" style="font-size: 11.5px; line-height: 1.5; margin-bottom: 8px; padding: 7px 9px; border-radius: 6px; background: var(--bg-panel);">Memuat diagnostik…</div>
+                    <table id="why-table" style="font-size: 11px;">
+                        <thead><tr>
+                            <th>Lapis</th><th>Jalur BUY</th><th>Jalur SELL</th>
+                        </tr></thead>
+                        <tbody id="why-table-body">
+                            <tr><td colspan="3" style="text-align:center; color: var(--text-sub);">—</td></tr>
+                        </tbody>
+                    </table>
+                    <div class="info-row"><span class="info-label">Bar M5 tutup dalam</span><span class="info-val val-gold" id="m5-countdown">--:--</span></div>
+                    <div class="info-row"><span class="info-label">Sinyal terakhir</span><span class="info-val" id="last-signal">—</span></div>
                 </div>
 
                 <!-- Protocol Rules (D-02: semua nilai DINAMIS dari engine aktif — tak ada hardcode legacy) -->
@@ -428,6 +447,12 @@
                     document.getElementById('pos-ticket').innerText = '#' + p.ticket;
                     document.getElementById('pos-entry').innerText = Number(p.entry).toFixed(2);
                     document.getElementById('pos-sl').innerText = Number(p.sl).toFixed(2);
+                    POSL = computePosLines(p);            // [D6-12] garis entry/SL/TP di chart
+                    renderChart();
+                    const prEl = document.getElementById('pos-reason');
+                    if (LASTSIG && LASTSIG.reason) {
+                        prEl.innerText = '📝 Alasan entry: ' + LASTSIG.reason;
+                    } else { prEl.innerText = ''; }
 
                     // [D6-08] Feed mati -> fav/pnl null: tampil "—" + alasan,
                     // BUKAN pnl ratusan ribu dolar dari harga 0.
@@ -455,6 +480,7 @@
                     document.getElementById('badge-tp3').innerText = p.tp3_hit ? ('TP3 HIT 🚀 (' + CFG.r3 + 'xSL, SL->TP1)') : 'TP3 PENDING';
                 } else {
                     posBanner.style.display = 'none';
+                    POSL = null;                          // [D6-12] garis posisi dihapus
                 }
             } catch (e) {
                 console.error("fetchStatus err:", e);
@@ -526,96 +552,230 @@
             }
         }
 
-        async function drawChart() {
+        // [D6-12] CHART REALTIME — candle di-cache; tick 1 dtk meng-update
+        // candle berjalan + garis harga LIVE; garis PDH/PDL & posisi (entry/SL/TP)
+        // digambar sebagai level; countdown ke close bar M5.
+        let CANDLES = [];
+        let G4L = { pdh: null, pdl: null };
+        let POSL = null;
+        let LASTTICK = null;
+        let LASTSIG = null;
+
+        function computePosLines(p) {
+            if (!p) return null;
+            const d = 0.10;
+            const s = p.type === 'BUY' ? 1 : -1;
+            return { type: p.type, entry: p.entry, sl: p.sl,
+                     tp1: p.entry + s * CFG.tp1 * d,
+                     tp2: p.entry + s * CFG.tp2 * d,
+                     tp3: p.entry + s * CFG.tp3 * d };
+        }
+
+        function fmtCountdown(s) {
+            if (s === null || s === undefined || isNaN(s)) return '--:--';
+            const m = Math.floor(s / 60), ss = Math.floor(s % 60);
+            return m + ':' + String(ss).padStart(2, '0');
+        }
+
+        function drawHLine(ctx, w, y, color, label, dash) {
+            ctx.strokeStyle = color; ctx.setLineDash(dash || []);
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+            ctx.setLineDash([]);
+            if (label) {
+                ctx.font = 'bold 10px sans-serif';
+                const tw = ctx.measureText(label).width + 10;
+                ctx.fillStyle = color; ctx.fillRect(4, y - 8, tw, 16);
+                ctx.fillStyle = '#000000'; ctx.fillText(label, 9, y + 4);
+            }
+        }
+
+        async function fetchCandles() {
+            try {
+                const res = await fetch(apiUrl('/api/candles'));
+                const d = await res.json();
+                if (d && d.length) { CANDLES = d; renderChart(); }
+            } catch (e) { console.error('fetchCandles err:', e); }
+        }
+
+        async function fetchTick() {
+            try {
+                const res = await fetch(apiUrl('/api/tick'));
+                LASTTICK = await res.json();
+                const badge = document.getElementById('chart-live-badge');
+                if (LASTTICK.valid) {
+                    badge.innerText = '● LIVE'; badge.className = 'badge badge-live';
+                    if (CANDLES.length) {
+                        const lc = CANDLES[CANDLES.length - 1];
+                        lc.close = Math.round(LASTTICK.bid * 100) / 100;
+                        lc.high = Math.max(lc.high, lc.close);
+                        lc.low = Math.min(lc.low, lc.close);
+                    }
+                } else {
+                    badge.innerText = '○ FEED MATI (' + (LASTTICK.reason || '?') + ')';
+                    badge.className = 'badge badge-red';
+                }
+                // countdown ke close bar M5 (dari jam server broker)
+                let cdown = null;
+                if (LASTTICK.server_time) {
+                    const parts = LASTTICK.server_time.split(':');
+                    if (parts.length === 3) {
+                        const secs = (+parts[1]) * 60 + (+parts[2]);
+                        cdown = 300 - (secs % 300);
+                    }
+                }
+                const cdTxt = fmtCountdown(cdown);
+                document.getElementById('chart-m5-countdown').innerText = cdTxt;
+                document.getElementById('m5-countdown').innerText = cdTxt;
+                renderChart();
+            } catch (e) { /* polling berikutnya */ }
+        }
+
+        async function fetchG4State() {
+            try {
+                const res = await fetch(apiUrl('/api/g4_state'));
+                const d = await res.json();
+                LASTSIG = d.last_signal || null;
+                const panel = document.getElementById('why-panel');
+                if ((d.strategy || 'ICAS') !== 'G4') { panel.style.display = 'none'; return; }
+                panel.style.display = 'block';
+                G4L = { pdh: d.pdh, pdl: d.pdl };
+                renderChart();
+
+                const st = document.getElementById('why-status');
+                if (!d.available) {
+                    st.innerHTML = '⚠️ ' + esc((d.blockers[0] || {}).text || 'Data kaskade belum tersedia');
+                    st.style.borderLeft = '3px solid var(--red)';
+                } else if (d.blockers.length) {
+                    const b = d.blockers[0];
+                    st.innerHTML = (b.code === 'ready' ? '✅ ' : '⛔ ') + esc(b.text);
+                    st.style.borderLeft = '3px solid ' + (b.code === 'ready' ? 'var(--green)' : 'var(--red)');
+                } else {
+                    st.innerHTML = '✅ Tidak ada bloker — menunggu bar M5 tutup.';
+                    st.style.borderLeft = '3px solid var(--green)';
+                }
+
+                const tb = document.getElementById('why-table-body');
+                if (d.detail && d.detail.layers) {
+                    tb.innerHTML = d.detail.layers.map(l => `
+                        <tr>
+                            <td style="color: var(--text-sub);">${esc(l.name)}</td>
+                            <td class="${l.buy_ok ? 'val-green' : 'val-red'}">${l.buy_ok ? '✅' : '❌'} <span style="font-size:10px;">${esc(l.buy_text)}</span></td>
+                            <td class="${l.sell_ok ? 'val-green' : 'val-red'}">${l.sell_ok ? '✅' : '❌'} <span style="font-size:10px;">${esc(l.sell_text)}</span></td>
+                        </tr>`).join('') +
+                        (d.detail.signal
+                            ? `<tr><td colspan="3" style="text-align:center;"><span class="badge ${d.detail.signal === 'BUY' ? 'badge-live' : 'badge-red'}">SINYAL AKTIF BAR INI: ${d.detail.signal}</span></td></tr>`
+                            : '');
+                }
+
+                const ls = document.getElementById('last-signal');
+                if (d.last_signal) {
+                    ls.innerHTML = '<span class="' + (d.last_signal.type === 'BUY' ? 'val-green' : 'val-red') + '">' + esc(d.last_signal.type) + '</span> @ ' + esc((d.last_signal.ts || '').slice(5, 16).replace('T', ' '));
+                    ls.title = d.last_signal.reason || '';
+                } else { ls.innerText = '—'; ls.title = ''; }
+            } catch (e) { console.error('fetchG4State err:', e); }
+        }
+
+        function renderChart() {
             const canvas = document.getElementById('candleChart');
             const ctx = canvas.getContext('2d');
             canvas.width = canvas.parentElement.clientWidth - 28;
             canvas.height = 380;
+            if (!CANDLES.length) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            try {
-                const res = await fetch(apiUrl('/api/candles'));
-                const candles = await res.json();
-                if (!candles || candles.length === 0) return;
+            let minP = Infinity, maxP = -Infinity;
+            const extra = [];
+            if (G4L.pdh) extra.push(G4L.pdh);
+            if (G4L.pdl) extra.push(G4L.pdl);
+            if (POSL) extra.push(POSL.entry, POSL.sl, POSL.tp1, POSL.tp2, POSL.tp3);
+            CANDLES.forEach(c => {
+                if (c.low < minP) minP = c.low;
+                if (c.high > maxP) maxP = c.high;
+            });
+            extra.forEach(v => {
+                if (v && v > 0) { if (v < minP) minP = v; if (v > maxP) maxP = v; }
+            });
+            const pad = (maxP - minP) * 0.08 || 1.0;
+            minP -= pad; maxP += pad;
 
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const n = CANDLES.length;
+            const candleWidth = Math.max(3.5, (canvas.width / n) * 0.65);
+            const step = canvas.width / n;
+            const yOf = p => canvas.height - ((p - minP) / (maxP - minP)) * canvas.height;
 
-                let minP = Infinity, maxP = -Infinity;
-                candles.forEach(c => {
-                    if (c.low < minP) minP = c.low;
-                    if (c.high > maxP) maxP = c.high;
-                });
-                const pad = (maxP - minP) * 0.08 || 1.0;
-                minP -= pad; maxP += pad;
+            // Asian Range Band
+            CANDLES.forEach((c, idx) => {
+                const x = idx * step + step / 2;
+                if (c.asian_high && c.asian_low && c.asian_high > c.asian_low) {
+                    const yAH = yOf(c.asian_high);
+                    const yAL = yOf(c.asian_low);
+                    ctx.fillStyle = 'rgba(245, 179, 36, 0.03)';
+                    ctx.fillRect(x - step/2, yAH, step, yAL - yAH);
+                }
+            });
 
-                const n = candles.length;
-                const candleWidth = Math.max(3.5, (canvas.width / n) * 0.65);
-                const step = canvas.width / n;
-
-                // Asian Range Band
-                candles.forEach((c, idx) => {
-                    const x = idx * step + step / 2;
-                    if (c.asian_high && c.asian_low && c.asian_high > c.asian_low) {
-                        const yAH = canvas.height - ((c.asian_high - minP) / (maxP - minP)) * canvas.height;
-                        const yAL = canvas.height - ((c.asian_low - minP) / (maxP - minP)) * canvas.height;
-                        ctx.fillStyle = 'rgba(245, 179, 36, 0.03)';
-                        ctx.fillRect(x - step/2, yAH, step, yAL - yAH);
-                    }
-                });
-
-                // Candlesticks
-                candles.forEach((c, idx) => {
-                    const x = idx * step + step / 2;
-                    const yOpen = canvas.height - ((c.open - minP) / (maxP - minP)) * canvas.height;
-                    const yClose = canvas.height - ((c.close - minP) / (maxP - minP)) * canvas.height;
-                    const yHigh = canvas.height - ((c.high - minP) / (maxP - minP)) * canvas.height;
-                    const yLow = canvas.height - ((c.low - minP) / (maxP - minP)) * canvas.height;
-
-                    const isGreen = c.close >= c.open;
-                    ctx.strokeStyle = isGreen ? '#10d88b' : '#f75268';
-                    ctx.fillStyle = isGreen ? '#10d88b' : '#f75268';
-
-                    if (c.bull_fvg) {
-                        ctx.fillStyle = 'rgba(16, 216, 139, 0.15)';
-                        ctx.fillRect(x - step/2, yHigh - 5, step, 10);
-                        ctx.fillStyle = '#10d88b';
-                    } else if (c.bear_fvg) {
-                        ctx.fillStyle = 'rgba(247, 82, 104, 0.15)';
-                        ctx.fillRect(x - step/2, yLow - 5, step, 10);
-                        ctx.fillStyle = '#f75268';
-                    }
-
-                    ctx.beginPath();
-                    ctx.lineWidth = 1.2;
-                    ctx.moveTo(x, yHigh);
-                    ctx.lineTo(x, yLow);
-                    ctx.stroke();
-
-                    const top = Math.min(yOpen, yClose);
-                    const h = Math.max(2, Math.abs(yClose - yOpen));
-                    ctx.fillRect(x - candleWidth / 2, top, candleWidth, h);
-                });
-
-                // Latest Price Tag
-                const latest = candles[candles.length - 1];
-                const yLatest = canvas.height - ((latest.close - minP) / (maxP - minP)) * canvas.height;
-                ctx.strokeStyle = '#f5b324';
-                ctx.setLineDash([4, 4]);
-                ctx.beginPath();
-                ctx.moveTo(0, yLatest);
-                ctx.lineTo(canvas.width, yLatest);
-                ctx.stroke();
-                ctx.setLineDash([]);
-
-                const labelText = 'BID: ' + latest.close.toFixed(2);
-                ctx.fillStyle = '#f5b324';
-                ctx.fillRect(canvas.width - 85, yLatest - 11, 85, 22);
-                ctx.fillStyle = '#000000';
-                ctx.font = 'bold 11px sans-serif';
-                ctx.fillText(labelText, canvas.width - 78, yLatest + 4);
-
-            } catch (e) {
-                console.error("drawChart err:", e);
+            // [D6-12] Level G4: PDH/PDL (target likuiditas) + posisi aktif
+            if (G4L.pdh) drawHLine(ctx, canvas.width, yOf(G4L.pdh), '#f5b324', 'PDH ' + G4L.pdh.toFixed(2), [6, 4]);
+            if (G4L.pdl) drawHLine(ctx, canvas.width, yOf(G4L.pdl), '#f5b324', 'PDL ' + G4L.pdl.toFixed(2), [6, 4]);
+            if (POSL) {
+                drawHLine(ctx, canvas.width, yOf(POSL.entry), '#ffffff', 'ENTRY ' + POSL.entry.toFixed(2), [2, 3]);
+                drawHLine(ctx, canvas.width, yOf(POSL.sl), '#f75268', 'SL ' + POSL.sl.toFixed(2), []);
+                drawHLine(ctx, canvas.width, yOf(POSL.tp1), '#10d88b', 'TP1 ' + POSL.tp1.toFixed(2), [4, 3]);
+                drawHLine(ctx, canvas.width, yOf(POSL.tp2), '#10d88b', 'TP2 ' + POSL.tp2.toFixed(2), [4, 3]);
+                drawHLine(ctx, canvas.width, yOf(POSL.tp3), '#10d88b', 'TP3 ' + POSL.tp3.toFixed(2), [4, 3]);
             }
+
+            // Candlesticks
+            CANDLES.forEach((c, idx) => {
+                const x = idx * step + step / 2;
+                const yOpen = yOf(c.open);
+                const yClose = yOf(c.close);
+                const yHigh = yOf(c.high);
+                const yLow = yOf(c.low);
+
+                const isGreen = c.close >= c.open;
+                ctx.strokeStyle = isGreen ? '#10d88b' : '#f75268';
+                ctx.fillStyle = isGreen ? '#10d88b' : '#f75268';
+
+                if (c.bull_fvg) {
+                    ctx.fillStyle = 'rgba(16, 216, 139, 0.15)';
+                    ctx.fillRect(x - step/2, yHigh - 5, step, 10);
+                    ctx.fillStyle = '#10d88b';
+                } else if (c.bear_fvg) {
+                    ctx.fillStyle = 'rgba(247, 82, 104, 0.15)';
+                    ctx.fillRect(x - step/2, yLow - 5, step, 10);
+                    ctx.fillStyle = '#f75268';
+                }
+
+                ctx.beginPath();
+                ctx.lineWidth = 1.2;
+                ctx.moveTo(x, yHigh);
+                ctx.lineTo(x, yLow);
+                ctx.stroke();
+
+                const top = Math.min(yOpen, yClose);
+                const h = Math.max(2, Math.abs(yClose - yOpen));
+                ctx.fillRect(x - candleWidth / 2, top, candleWidth, h);
+            });
+
+            // Live price line — tick 1 dtk (fallback: close candle terakhir)
+            const latest = CANDLES[n - 1];
+            const livePx = (LASTTICK && LASTTICK.valid) ? LASTTICK.bid : latest.close;
+            const yLatest = yOf(livePx);
+            ctx.strokeStyle = '#f5b324';
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(0, yLatest);
+            ctx.lineTo(canvas.width, yLatest);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            const labelText = 'BID: ' + livePx.toFixed(2);
+            ctx.fillStyle = '#f5b324';
+            ctx.fillRect(canvas.width - 85, yLatest - 11, 85, 22);
+            ctx.fillStyle = '#000000';
+            ctx.font = 'bold 11px sans-serif';
+            ctx.fillText(labelText, canvas.width - 78, yLatest + 4);
         }
 
         // [D-05] Mini feed event jurnal di panel observasi
@@ -641,12 +801,16 @@
 
         fetchStatus();
         fetchStatsAndTrades();
-        drawChart();
+        fetchCandles();
+        fetchG4State();
         fetchJournal();
+        fetchTick();
         setInterval(fetchStatus, 2000);
         setInterval(fetchStatsAndTrades, 5000);
-        setInterval(drawChart, 8000);
         setInterval(fetchJournal, 5000);
+        setInterval(fetchCandles, 10000);
+        setInterval(fetchG4State, 10000);
+        setInterval(fetchTick, 1000);      // [D6-12] chart realtime 1 dtk
     </script>
 </body>
 </html>

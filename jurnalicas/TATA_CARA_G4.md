@@ -225,8 +225,17 @@ Terminal kedua (venv aktif):
 python run_dashboard.py
 ```
 
-Buka `http://localhost:5000` — statistik live, equity, daftar trade, merge
-partial-TP per tiket. Token proteksi opsional: `set ICAS_DASH_TOKEN=...`.
+Buka `http://localhost:5000`. Panel yang tersedia (rev 09 Sep 2026):
+
+- **Kenapa (Belum) Entry** — bloker aktif (mutex/warm-up/spread/kaskade) +
+  checklist kaskade L1–L4 per jalur BUY vs SELL + countdown bar M5 +
+  alasan sinyal terakhir (hover "Sinyal terakhir" untuk detail lengkap).
+- **Chart realtime** — candle bergerak tiap detik (tick live), garis PDH/PDL,
+  garis ENTRY/SL/TP1-3 saat posisi aktif, badge ● LIVE / ○ FEED MATI.
+- Statistik live, equity, riwayat trade (merge partial-TP per tiket), jurnal
+  event, badge spread USD vs guard entry.
+
+Token proteksi opsional: `set ICAS_DASH_TOKEN=...`.
 
 ---
 

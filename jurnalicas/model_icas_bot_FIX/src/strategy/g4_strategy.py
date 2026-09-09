@@ -180,6 +180,122 @@ def g4_signal_at(df_m5: pd.DataFrame, df_m15: pd.DataFrame, df_h1: pd.DataFrame,
     return None
 
 
+def g4_cascade_detail(df_m5: pd.DataFrame, df_m15: pd.DataFrame, df_h1: pd.DataFrame,
+                      spread_usd: Optional[float] = None, sweep_bars: int = 288,
+                      fvg_buffer: float = 0.30, ema_span: int = 200,
+                      min_h1_bars: int = 260) -> dict:
+    """[DASHBOARD 09 Sep 2026] Diagnostik kaskade G4 per-lapis pada bar M5
+    TERTUTUP terakhir (frame hasil frames_from_raw — bar berjalan sudah dibuang,
+    identik cara daemon mengevaluasi). READ-ONLY untuk UI "kenapa belum entry /
+    kenapa BUY / kenapa SELL"; jalur trading tetap G4Strategy.evaluate yang
+    paritas-terbukti — JANGAN mengganti logic dua fungsi itu dengan fungsi ini.
+
+    Return dict: ok, bar_time, close, bars, warmup_ok, layers (list per-lapis
+    dengan status jalur BUY & SELL + teks penjelas), signal (BUY/SELL/None).
+    """
+    res: dict = {"ok": False, "signal": None, "layers": [], "warmup_ok": False}
+    if df_m5 is None or len(df_m5) < 10:
+        res["error"] = "frame M5 kosong / kurang dari 10 bar"
+        return res
+    i = len(df_m5) - 1
+    t_i = df_m5.index[i]
+    c = float(df_m5["close"].iloc[i])
+    o = float(df_m5["open"].iloc[i])
+    res.update({"ok": True, "bar_time": str(t_i), "close": round(c, 2),
+                "open": round(o, 2), "spread_usd": spread_usd,
+                "bars": {"m5": len(df_m5),
+                         "m15": 0 if df_m15 is None else len(df_m15),
+                         "h1": 0 if df_h1 is None else len(df_h1)}})
+    res["warmup_ok"] = bool(
+        len(df_m5) >= 350 and df_m15 is not None and len(df_m15) >= 20
+        and df_h1 is not None and len(df_h1) >= min_h1_bars)
+
+    # ---- L1: bias H1 ----
+    h1_ema = (_h1_ema_at(df_h1, t_i, ema_span=ema_span, min_h1_bars=min_h1_bars)
+              if df_h1 is not None and len(df_h1) else None)
+    if h1_ema is None:
+        b1 = s1 = False
+        l1 = {"name": "L1 · Bias H1 (EMA200)", "buy_ok": False, "sell_ok": False,
+              "buy_text": "EMA200-H1 belum valid (histori kurang)",
+              "sell_text": "EMA200-H1 belum valid"}
+    else:
+        b1, s1 = c > h1_ema, c < h1_ema
+        l1 = {"name": "L1 · Bias H1 (EMA200)", "buy_ok": b1, "sell_ok": s1,
+              "buy_text": f"close {c:.2f} {'>' if b1 else '≤'} EMA {h1_ema:.2f}",
+              "sell_text": f"close {c:.2f} {'<' if s1 else '≥'} EMA {h1_ema:.2f}",
+              "ema": round(h1_ema, 2)}
+
+    # ---- L2: sweep PDH/PDL ----
+    lvl = _pd_levels(df_m5, t_i)
+    if lvl is None:
+        b2 = s2 = False
+        l2 = {"name": f"L2 · Sweep PDH/PDL (24j / {sweep_bars} bar)",
+              "buy_ok": False, "sell_ok": False,
+              "buy_text": "belum ada hari bursa sebelumnya", "sell_text": "—"}
+    else:
+        pdh, pdl = lvl
+        lo_win = df_m5["low"].iloc[max(0, i - sweep_bars):i]
+        hi_win = df_m5["high"].iloc[max(0, i - sweep_bars):i]
+        b2 = bool((lo_win <= pdl).any())
+        s2 = bool((hi_win >= pdh).any())
+        l2 = {"name": f"L2 · Sweep PDH/PDL (24j / {sweep_bars} bar)",
+              "buy_ok": b2, "sell_ok": s2,
+              "buy_text": (f"low 24j ≤ PDL {pdl:.2f} (sweep ✅)" if b2
+                           else f"low 24j belum tembus PDL {pdl:.2f}"),
+              "sell_text": (f"high 24j ≥ PDH {pdh:.2f} (sweep ✅)" if s2
+                            else f"high 24j belum tembus PDH {pdh:.2f}"),
+              "pdh": round(pdh, 2), "pdl": round(pdl, 2)}
+
+    # ---- L3: CHoCH M15 ----
+    if df_m15 is None or len(df_m15) < 7:
+        b3 = s3 = False
+        l3 = {"name": "L3 · CHoCH M15 (swing 5-bar)", "buy_ok": False,
+              "sell_ok": False, "buy_text": "histori M15 kurang",
+              "sell_text": "histori M15 kurang"}
+    else:
+        k = df_m15.index.searchsorted(t_i - pd.Timedelta(minutes=15), side="right") - 1
+        if k < 6:
+            b3 = s3 = False
+            l3 = {"name": "L3 · CHoCH M15 (swing 5-bar)", "buy_ok": False,
+                  "sell_ok": False, "buy_text": "swing M15 belum terbentuk",
+                  "sell_text": "swing M15 belum terbentuk"}
+        else:
+            sw15_h = float(df_m15["high"].iloc[k - 6:k - 1].max())
+            sw15_l = float(df_m15["low"].iloc[k - 6:k - 1].min())
+            b3, s3 = c > sw15_h, c < sw15_l
+            l3 = {"name": "L3 · CHoCH M15 (swing 5-bar)", "buy_ok": b3, "sell_ok": s3,
+                  "buy_text": (f"close {c:.2f} > swing {sw15_h:.2f} ✅" if b3
+                               else f"close {c:.2f} ≤ swing {sw15_h:.2f}"),
+                  "sell_text": (f"close {c:.2f} < swing {sw15_l:.2f} ✅" if s3
+                                else f"close {c:.2f} ≥ swing {sw15_l:.2f}"),
+                  "swing_h": round(sw15_h, 2), "swing_l": round(sw15_l, 2)}
+
+    # ---- L4: displacement/FVG M5 ----
+    if i < 6:
+        b4 = s4 = False
+        l4 = {"name": "L4 · Displacement + FVG M5", "buy_ok": False,
+              "sell_ok": False, "buy_text": "bar kurang", "sell_text": "bar kurang"}
+    else:
+        swing_h5 = float(df_m5["high"].iloc[i - 6:i - 1].max())
+        swing_l5 = float(df_m5["low"].iloc[i - 6:i - 1].min())
+        bull_fvg = float(df_m5["low"].iloc[i]) > float(df_m5["high"].iloc[i - 2]) + fvg_buffer
+        bear_fvg = float(df_m5["high"].iloc[i]) < float(df_m5["low"].iloc[i - 2]) - fvg_buffer
+        b4 = (c > o) and (c > swing_h5 or bull_fvg)
+        s4 = (c < o) and (c < swing_l5 or bear_fvg)
+        l4 = {"name": "L4 · Displacement + FVG M5", "buy_ok": b4, "sell_ok": s4,
+              "buy_text": ("candle bull " + ("+ break swing" if c > swing_h5 else "")
+                           + (" + FVG" if bull_fvg else "")) if b4
+                          else "candle M5 belum displacement bull",
+              "sell_text": ("candle bear " + ("+ break swing" if c < swing_l5 else "")
+                            + (" + FVG" if bear_fvg else "")) if s4
+                           else "candle M5 belum displacement bear"}
+
+    res["layers"] = [l1, l2, l3, l4]
+    res["signal"] = ("BUY" if (b1 and b2 and b3 and b4)
+                     else ("SELL" if (s1 and s2 and s3 and s4) else None))
+    return res
+
+
 class G4Strategy:
     """Kelas strategi G4 — interface kompatibel ModelIcasStrategy (counter harian,
     can_trade_today, evaluate) sehingga daemon & StateStore tetap bekerja."""

@@ -270,6 +270,28 @@ def main():
     check("template: badge strategi + panel G4 + badge spread",
           all(k in src_html for k in ("strategy-badge", "g4-panel", "spread-badge")))
 
+    # ------------------------------------------------------------------ D6-12
+    print("\n[D6-12] realtime + diagnostik G4 (tick 1 dtk, kenapa belum entry)")
+    r = client.get("/api/tick")
+    d = r.get_json()
+    check("HTTP 200 /api/tick", r.status_code == 200)
+    check("field bid/ask/spread_usd/valid/server_time",
+          all(k in d for k in ("bid", "ask", "spread_usd", "valid", "server_time")))
+    check("spread_usd digit-aware (points x point)",
+          abs(d["spread_usd"] - round(3350.26 - 3350.0, 2)) < 1e-9
+          or d["spread_usd"] >= 0)
+    r = client.get("/api/g4_state")
+    d = r.get_json()
+    check("HTTP 200 /api/g4_state", r.status_code == 200)
+    check("struktur: available/blockers/strategy/next_close_secs",
+          all(k in d for k in ("available", "blockers", "strategy", "next_close_secs")))
+    check("mode sim (tanpa MT5): available False + bloker 'data'",
+          d["available"] is False
+          and any(b.get("code") == "data" for b in d["blockers"]))
+    check("template: panel why + poll tick/g4_state + countdown + PDH",
+          all(k in src_html for k in ("why-panel", "api/tick", "api/g4_state",
+                                      "m5-countdown", "chart-m5-countdown", "PDH")))
+
     # --------------------------------------------------------------- regresi
     print("\n[REGRESI] endpoint & field lama tetap utuh")
     write_journal([

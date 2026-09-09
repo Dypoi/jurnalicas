@@ -25,6 +25,7 @@ from config import config
 from src.indicators.sessions import calculate_session_killzones, is_current_in_burst
 from src.execution.mt5_bridge import IcasMT5Bridge
 from src.backtest.engine import IcasBacktestEngine
+from src.strategy.g4_strategy import frames_from_raw, g4_cascade_detail
 
 app = Flask(__name__, template_folder='../templates')
 
@@ -633,6 +634,116 @@ def api_stats():
     return jsonify({
         "stats": stats,
         "recent_trades": trades[:30]
+    })
+
+
+# ==================== [D6-12] REALTIME + DIAGNOSTIK G4 (09 Sep 2026) ====================
+
+@app.route('/api/tick')
+def api_tick():
+    """[D6-12] Tick SUPER-RINGAN untuk update chart tiap 1 detik (bid/ask/spread/
+    jam server) — tanpa beban journal/akun seperti /api/status (tetap 2 dtk)."""
+    t = bridge.get_current_tick()
+    srv = None
+    if _ATHENS_TZ is not None:
+        srv = datetime.datetime.now(_ATHENS_TZ).strftime("%H:%M:%S")
+    return jsonify({
+        "bid": t["bid"], "ask": t["ask"],
+        "spread_usd": round(t["spread"] * price_point, 2),
+        "valid": bool(t.get("valid", True)),
+        "reason": t.get("reason", "ok"),
+        "server_time": srv,
+    })
+
+
+@app.route('/api/g4_state')
+def api_g4_state():
+    """[D6-12] Diagnostik kaskade G4: "kenapa belum entry" (bloker + checklist
+    per-lapis) dan "kenapa BUY/SELL" (status jalur BUY vs SELL per lapis +
+    alasan sinyal terakhir dari jurnal). READ-ONLY — mengevaluasi bar M5
+    TERTUTUP terakhir persis seperti daemon (frames_from_raw membuang bar
+    berjalan); tidak mengirim order apa pun."""
+    tick = bridge.get_current_tick()
+    spread_usd_now = round(tick["spread"] * price_point, 2)
+    max_spread_usd = float(getattr(config, "MAX_SPREAD_USD", 0.0) or 0.0)
+
+    frames = frames_from_raw(
+        bridge.get_latest_candles("M5", 400),
+        bridge.get_latest_candles("M15", 120),
+        bridge.get_latest_candles("H1", 3000))
+    det = None
+    blockers = []
+    if frames is None:
+        blockers.append({"code": "data",
+                         "text": "Candle M5/M15/H1 belum tersedia — cek koneksi "
+                                 "terminal & Market Watch (mode simulasi tanpa MT5 "
+                                 "tidak bisa memantau kaskade)"})
+    else:
+        det = g4_cascade_detail(frames[0], frames[1], frames[2],
+                                spread_usd=spread_usd_now,
+                                sweep_bars=int(getattr(config, "G4_SWEEP_BARS", 288)),
+                                fvg_buffer=float(getattr(config, "G4_FVG_BUFFER_USD", 0.30)),
+                                ema_span=int(getattr(config, "G4_H1_EMA_SPAN", 200)),
+                                min_h1_bars=int(getattr(config, "G4_MIN_H1_BARS", 260)))
+        b = det.get("bars", {})
+        if not det.get("warmup_ok"):
+            blockers.append({"code": "warmup",
+                             "text": (f"Warm-up histori: punya {b.get('m5', 0)} M5 / "
+                                      f"{b.get('m15', 0)} M15 / {b.get('h1', 0)} H1 — "
+                                      f"butuh ≥350 / 20 / 260. Tunggu terminal sync.")})
+    pos = bridge.get_open_position_details()
+    if pos is not None:
+        blockers.append({"code": "mutex",
+                         "text": f"Posisi #{pos.get('ticket')} masih terbuka — "
+                                 f"mutex 1-posisi, entry baru menunggu posisi tutup."})
+    if max_spread_usd > 0 and spread_usd_now > max_spread_usd:
+        blockers.append({"code": "spread",
+                         "text": f"Spread ${spread_usd_now:.2f} > guard ${max_spread_usd:.2f} "
+                                 f"— sinyal (bila ada) ditahan sampai spread normal."})
+    if det is not None and det.get("signal") is None and not blockers:
+        failed_buy = [l["name"].split(" ·")[0] for l in det["layers"] if not l["buy_ok"]]
+        failed_sell = [l["name"].split(" ·")[0] for l in det["layers"] if not l["sell_ok"]]
+        blockers.append({"code": "cascade",
+                         "text": "Kaskade belum lengkap (normal — mayoritas bar begitu). "
+                                 f"Jalur BUY gagal di: {', '.join(failed_buy)} | "
+                                 f"Jalur SELL gagal di: {', '.join(failed_sell)}."})
+    if det is not None and det.get("signal") is not None and not blockers:
+        blockers.append({"code": "ready",
+                         "text": f"SINYAL {det['signal']} VALID pada bar {det.get('bar_time')} — "
+                                 f"daemon mengirim order saat bar M5 tutup."})
+
+    # sinyal terakhir dari jurnal (alasan BUY/SELL)
+    last_signal = None
+    for e in reversed(_journal_events()):
+        if e.get("event") == "signal_detected":
+            last_signal = {"ts": e.get("ts"), "type": e.get("type"),
+                           "entry": e.get("entry"), "reason": e.get("reason")}
+            break
+
+    # countdown ke penutupan bar M5 berikutnya (waktu server Athens)
+    next_close_secs = None
+    if _ATHENS_TZ is not None:
+        now_srv = datetime.datetime.now(_ATHENS_TZ)
+        next_close_secs = 300 - (now_srv.minute * 60 + now_srv.second) % 300
+
+    pdh = pdl = ema = None
+    if det:
+        l2 = det["layers"][1] if len(det["layers"]) > 1 else {}
+        l1 = det["layers"][0] if det["layers"] else {}
+        pdh, pdl = l2.get("pdh"), l2.get("pdl")
+        ema = l1.get("ema")
+
+    return jsonify({
+        "available": frames is not None,
+        "strategy": getattr(config, "STRATEGY", "ICAS"),
+        "detail": det,
+        "blockers": blockers,
+        "spread_usd": spread_usd_now,
+        "max_spread_usd": max_spread_usd,
+        "position_open": pos is not None,
+        "last_signal": last_signal,
+        "pdh": pdh, "pdl": pdl, "h1_ema": ema,
+        "next_close_secs": next_close_secs,
     })
 
 def run_server(host=config.DASHBOARD_HOST, port=config.DASHBOARD_PORT):
