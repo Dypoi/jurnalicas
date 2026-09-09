@@ -129,6 +129,24 @@ def _write_health_marker(path: str, journal_health: dict, bridge: IcasMT5Bridge,
         pass  # marker bersifat informatif, tidak boleh mengganggu daemon
 
 
+def _sl_improves(pos_type: str, new_sl: float, cur_sl: float) -> bool:
+    """[PARITAS EXIT G4 — 09 Sep 2026] SL hanya boleh bergerak MENDEKAT ke arah
+    profit (monotonic) — replika eksak ``Position.raise_sl`` engine riset
+    (research/backtest_m1_audit.py: hanya raise utk BUY / lower utk SELL).
+
+    Tanpa guard ini, blok BE-lock pasca-TP1 dan step-SL-ke-TP1 pasca-TP3 di
+    daemon MENGEMBALIKAN SL yang sudah dikunci trailing ke level yang lebih
+    rendah (contoh nyata: trailing G4 sudah mengunci +130 pips, TP1 lalu
+    menurunkan SL ke ~+5,6 pips; pasca-TP3 trailing +530 pips diturunkan ke
+    +187,5 pips) — runner memberi kembali profit yang seharusnya terlindungi,
+    dan hasil live menyimpang dari backtest (+$4.493 mengasumsikan SL monoton,
+    lihat LAPORAN_STRATEGI_G4.md §Exit).
+    """
+    if pos_type == "BUY":
+        return new_sl > float(cur_sl or 0.0) + 1e-9
+    return new_sl < float(cur_sl) - 1e-9
+
+
 def main():
     logger.info("=" * 80)
     logger.info(f"   🚀 MODEL ICAS LIVE DAEMON — ENGINE BARU: {getattr(config, 'ENGINE_VERSION', 'v2')}")
@@ -600,10 +618,12 @@ def main():
                         v = min_lot
                     return round(min(v, remaining_vol), 2)
 
-                # 1A. Early BE+ Check (NONAKTIF pada engine v2: trigger 9999)
+                # 1A. Early BE+ Check (NONAKTIF pada engine v2/G4: trigger 9999)
                 if not pos.get("be_set", False) and fav_pips >= config.EARLY_BE_TRIGGER_PIPS:
                     new_sl = ep + be_offset if pos["type"] == "BUY" else ep - be_offset
-                    if sl_clearance_ok(new_sl) and bridge.modify_sl(pos["ticket"], new_sl):
+                    if (_sl_improves(pos["type"], new_sl, pos.get("sl"))
+                            and sl_clearance_ok(new_sl) and bridge.modify_sl(pos["ticket"], new_sl)):
+                        pos["sl"] = new_sl
                         pos["be_set"] = True
                         logger.info(f"🛡️ Early BE+ Aktif pada Ticket {pos['ticket']}! SL dikunci di {new_sl:.2f} (Guaranteed Profit)")
                         journal.log("be_lock", ticket=pos["ticket"], trigger="early_be",
@@ -622,10 +642,19 @@ def main():
                         journal.log("tp_hit", ticket=pos["ticket"], level=1, close_vol=close_vol,
                                     fav_pips=round(cur_fav_pips, 1), remaining_vol=remaining_vol)
                         new_sl = ep + be_offset if pos["type"] == "BUY" else ep - be_offset
-                        if sl_clearance_ok(new_sl) and bridge.modify_sl(pos["ticket"], new_sl):
+                        # [PARITAS EXIT] BE-lock pasca-TP1 hanya bila MENAIKkan SL
+                        # (replika engine: raise_sl(entry) monotonic) — jangan
+                        # menurunkan kunci trailing yang sudah lebih tinggi.
+                        if _sl_improves(pos["type"], new_sl, pos.get("sl")) \
+                                and sl_clearance_ok(new_sl) and bridge.modify_sl(pos["ticket"], new_sl):
+                            pos["sl"] = new_sl
                             pos["be_set"] = True
                             journal.log("be_lock", ticket=pos["ticket"], trigger="post_tp1",
                                         new_sl=round(new_sl, 4))
+                        else:
+                            # SL sudah lebih baik (trailing) — tandai BE tercapai
+                            # tanpa menurunkan SL (identik engine: pos.be = True).
+                            pos["be_set"] = True
 
                 # 1C. TP2 Check (+375 pips -> Close 25% lot)
                 if pos.get("tp1_hit", False) and not pos.get("tp2_hit", False) and tp_metric_pips >= config.TP2_PIPS:
@@ -648,19 +677,29 @@ def main():
                         logger.info(f"🎯 TP3 Hit (3.75xSL / +{config.TP3_PIPS:.0f} pips)! Closed {close_vol} lots ({config.TP3_LOT_RATIO*100:.0f}%) pada Ticket {pos['ticket']}")
                         # Step SL to TP1
                         tp1_price = ep + (config.TP1_PIPS * 0.10) if pos["type"] == "BUY" else ep - (config.TP1_PIPS * 0.10)
-                        if sl_clearance_ok(tp1_price) and bridge.modify_sl(pos["ticket"], tp1_price):
+                        # [PARITAS EXIT] step-ke-TP1 hanya bila meningkatkan SL —
+                        # pasca-TP3 trailing G4 biasanya sudah mengunci jauh di
+                        # atas TP1 (mis. +530p vs +187,5p); engine TIDAK pernah
+                        # menurunkan (raise_sl monotonic).
+                        if _sl_improves(pos["type"], tp1_price, pos.get("sl")) \
+                                and sl_clearance_ok(tp1_price) and bridge.modify_sl(pos["ticket"], tp1_price):
+                            pos["sl"] = tp1_price
                             logger.info(f"🚀 SL Runner Otomatis Dinaikkan ke Level TP1: {tp1_price:.2f} (+{config.TP1_PIPS:.0f} pips Locked)!")
                             journal.log("sl_step_to_tp1", ticket=pos["ticket"], new_sl=round(tp1_price, 4))
+                            pos["be_set"] = True
+                        else:
                             pos["be_set"] = True
                         journal.log("tp_hit", ticket=pos["ticket"], level=3, close_vol=close_vol,
                                     fav_pips=round(cur_fav_pips, 1), sl_moved_to_tp1=pos["be_set"])
 
-                # 1E. Trailing Step for Runner beyond TP3 (Every 100 pips -> Lock 30 pips)
+                # 1E. Trailing Step (G4: setiap 50 pips MFE -> lock 30 pips + 50/step)
                 k_step = int(fav_pips // config.TRAILING_STEP_PIPS)
                 if k_step >= 1 and k_step > pos.get("trail_step", 0):
                     lock_dist = (k_step - 1) * (config.TRAILING_STEP_PIPS * 0.10) + (config.TRAILING_LOCK_PIPS * 0.10)
                     new_sl = ep + lock_dist if pos["type"] == "BUY" else ep - lock_dist
-                    if sl_clearance_ok(new_sl) and bridge.modify_sl(pos["ticket"], new_sl):
+                    if _sl_improves(pos["type"], new_sl, pos.get("sl")) \
+                            and sl_clearance_ok(new_sl) and bridge.modify_sl(pos["ticket"], new_sl):
+                        pos["sl"] = new_sl
                         pos["trail_step"] = k_step
                         logger.info(f"🚀 Trailing Runner Step {k_step} Aktif! SL dinaikkan ke {new_sl:.2f} (Lock profit +{lock_dist*10:.0f} pips)")
                         journal.log("trail_update", ticket=pos["ticket"], step=k_step,
