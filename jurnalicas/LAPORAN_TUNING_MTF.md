@@ -4,7 +4,7 @@
 **Uji lintas rezim : 2021–22 (bearish) dan 2022–23 (recovery)**
 **Engine : `research/backtest_m1_audit.py` (bid/ask, anti-repaint, pesimis, spread riil, guard $1.20)**
 **Skrip : `research/tuning_mtf.py` (`--exec m5`, default sejak rev ini) — artefak: `model_icas_bot_FIX/reports/tuning_mtf_*_execm5.txt`**
-**Revisi : 08 September 2026 — rev 1 = eksekusi M1; rev 2 = eksekusi M5 (instruksi pengguna: "eksekusinya di m5 jangan m1"); rev 2.1 = tuning lanjutan (grid jendela PDH/PDL + filter tren SMA200 + sensitivitas tp_first)**
+**Revisi : 08 September 2026 — rev 1 = eksekusi M1; rev 2 = eksekusi M5 (instruksi pengguna: "eksekusinya di m5 jangan m1"); rev 2.1 = grid jendela PDH/PDL + filter tren SMA200 + sensitivitas tp_first; rev 2.2 = exit 2-tier + EMA200-harian + Monte-Carlo multi-seed 32 (risk maks 1%)**
 
 ---
 
@@ -49,6 +49,18 @@
 7. **Rekomendasi (rev 2.1)**: kandidat default DEMO = **V7T** (frekuensi sangat rendah ~4/bln);
    alternatif V7 (tanpa filter tren) dan V8T (~12/bln). Risk maks 1%. **Status tetap DEMO** —
    2022–23 masih −$171 dan sampel kandidat kecil (34–49 tr/tahun).
+8. **[REV 2.2 — exit 2-tier, EMA200-harian, Monte-Carlo multi-seed]** (a) exit 2-tier
+   TP 100/200 (V7TA): PF 2,04, +$1.316 — membaik di periode utama & 2021–22 tetapi LEBIH
+   BURUK di 2022–23 (−$266); (b) **V7E (filter EMA200-harian) kandidat terbaik baru**: PF 1,98,
+   +$1.434 (risk 1%), DD 3,1%, **kumulatif 3 periode +$2.117**, signifikan vs 32-seed acak di
+   DUA rezim (p=0,000); (c) **gerbang baru Monte-Carlo 32-seed**: semua kandidat signifikan di
+   2025–26 & 2021–22, tetapi di 2022–23 seluruh keluarga rugi DAN di bawah rata-rata acak
+   (acak μ +$48) → kelemahan rezim recovery belum teratasi; (d) `tp_first` (batas optimis):
+   V7E PF 2,22, V7TA/V7TD tidak berubah → edge kokoh di kedua batas asumsi.
+9. **Rekomendasi akhir (rev 2.2)**: kandidat DEMO utama = **V7E** (V7 + EMA200-harian,
+   ~4,5 entry/bln); alternatif V7TA (exit 2-tier). **Risk MAKS 1%** (instruksi pengguna
+   08 Sep 2026). Sebelum menimbang live: forward-test DEMO ≥3 bulan + riset filter
+   volatilitas/regime untuk menambal kelemahan 2022–23.
 
 ---
 
@@ -281,26 +293,82 @@ SL/TP intra-candle. Angka laporan tetap memakai batas pesimis.
 V7T: +$5.619 (DD 14,0%) — sangat bertahan; V8T: +$6.561 (DD 27,4%) — bertahan. Meski begitu
 rekomendasi tetap risk 1% (sampel kecil; 2022–23 masih minus).
 
-## 9. KESIMPULAN & REKOMENDASI (DIPERBARUI REV 2.1)
+## 9. TUNING LANJUTAN II (REV 2.2) — EXIT 2-TIER, EMA200-HARIAN, MONTE-CARLO MULTI-SEED
+
+Tiga eksperimen berikutnya dari antrean, semuanya risk 1%. Pemicu QC: kontrol acak tunggal
+pada run exit 2-tier (n=28 aktual) ikut "profit" PF 1,74 → satu draw acak tidak bermakna pada
+sampel kecil. Maka gerbang dinaikkan: **Monte-Carlo 32-seed** (`research/multiseed_check.py`) —
+kandidat dibandingkan dengan DISTRIBUSI 32 kontrol acak (geometri & jumlah entry identik);
+p-value empiris = fraksi seed acak yang mengalahkan net kandidat.
+
+### 9.1 Exit 2-tier & TP1+runner (periode utama, risk 1%)
+
+| Varian | Tr | WR% | PF | Net $ | DD% |
+|---|---:|---:|---:|---:|---:|
+| V7T (4-tier 187.5/375/562.5, referensi) | 45 | 73,3 | 1,95 | +1.192 | 3,1 |
+| **V7TA 2-tier TP 100/200 (50/50)** | 49 | **75,5** | **2,04** | **+1.316** | 3,1 |
+| V7TB 2-tier TP 100/300 (50/50) | 45 | 73,3 | 1,84 | +1.054 | 3,1 |
+| V7TC 2-tier TP 125/250 (50/50) | 46 | 71,7 | 1,68 | +933 | 3,1 |
+| **V7TD 2-tier TP 100/187.5 (60/40)** | 49 | **75,5** | **2,04** | +1.310 | 3,1 |
+| V7TE TP1 cepat 100 (60%) + runner trail | 45 | 73,3 | 1,92 | +1.159 | 3,1 |
+| V7E (**EMA200-harian**, exit 4-tier) | 49 | 71,4 | 1,98 | **+1.434** | 3,1 |
+
+(2-tier = r3=0 → posisi TP-FULL otomatis di TP2 — murni konfigurasi, tanpa perubahan engine.)
+
+### 9.2 EMA200-harian vs SMA200-harian pada V7
+
+V7E mengganti filter tren SMA200-harian → **EMA200-harian** (responsif lebih cepat terhadap
+perubahan rezim): periode utama +$1.434 vs +$1.192 (V7T), WR 71,4%, BUY/SELL 37/12.
+Lintas rezim dan kumulatif — lihat §9.3.
+
+### 9.3 Gerbang Monte-Carlo 32-seed (kandidat vs distribusi acak)
+
+| Kandidat | 2025–26: net (p) | 2021–22: net (p) | 2022–23: net (p) | Kumulatif |
+|---|---|---|---|---:|
+| V7T (SMA200d) | +1.192 (0,031) | +647 (0,031) | −171 (0,688) | +$1.668 |
+| **V7E (EMA200d)** | **+1.434 (0,000)** | **+788 (0,000)** | −105 (0,562) | **+$2.117** |
+| V7TA (2-tier) | +1.316 (0,000) | +746 (0,031) | −266 (0,812) | +$1.796 |
+| V7TD (2-tier) | +1.310 (0,000) | +678 (0,031) | −332 (0,875) | +$1.656 |
+| (V7 tanpa filter, ref) | +896 — | +736 — | −287 — | +$1.345 |
+
+Distribusi acak per rezim (32 seed): 2025–26 μ −$142..+$49, maks +$1.582; 2021–22 μ −$233,
+maks +$711; **2022–23 μ +$48..+$50, PF acak ~1,2–1,3 (rezim ini ramah bagi entry acak)**.
+
+Pembacaan jujur:
+- 2025–26 & 2021–22: semua kandidat SIGNIFIKAN di atas keberuntungan (V7E p=0,000 di keduanya).
+- **2022–23 (recovery): seluruh keluarga kaskade PDH/PDL rugi DAN di bawah rata-rata acak**
+  — kelemahan struktural di rezim ranging pasca-tren belum teratasi oleh filter tren maupun
+  exit 2-tier. Ini risiko terbesar kandidat; jangan disembunyikan.
+- Exit 2-tier memperbaiki periode utama tetapi memperburuk 2022–23 (−$266/−$332 vs −$171) —
+  net kumulatif tetap di bawah V7E/V7T 4-tier+EMA.
+
+### 9.4 Sensitivitas `tp_first` (batas optimis, rev 2.2)
+
+V7E: PF 2,22 / +$1.670 (vs pesimis 1,98 / +$1.434). V7TA & V7TD: **tidak berubah** (2,04) —
+exit 2-tier tidak menghasilkan kolisi SL-TP intra-candle → hasilnya bebas asumsi urutan.
+Edge bertahan di kedua batas untuk semua kandidat.
+
+## 10. KESIMPULAN & REKOMENDASI (DIPERBARUI REV 2.2)
 
 1. **Permintaan pengguna terpenuhi**: analisa H1 → M30 → M15 → M5 dengan **eksekusi M5** penuh
    (entry di open candle M5 berikutnya, manajemen per candle, pesimis, spread riil, dua guard
-   anti-optimis aktif) — 12 varian + kontrol acak + uji lintas rezim + reality-check.
-2. **Kandidat default DEMO berikutnya: V7T** — H1 bias EMA200 → sweep PDH/PDL fresh (jendela
-   2 bar) → CHoCH M15 → displacement/FVG M5 → **filter tren SMA200-harian** → eksekusi open
-   candle M5. 45 tr/tahun, WR 73,3%, PF 1,95, +$1.192/tahun (risk 1%), DD 3,1%, 8/11 hijau,
-   kumulatif 3 periode **+$1.668** (terbaik sepanjang seluruh seri tuning), 2021–22 jelas di
-   atas kontrol acak. Alternatif: **V7** (tanpa filter tren, ~7/bln, kumulatif +$1.345) dan
-   **V8T** (~12/bln, kumulatif +$1.389). W24h DITOLAK sebagai kandidat (rezim-specific).
-3. **Status: DEMO saja, risk maks 1%.** Alasan tidak naik ke live: 2022–23 masih −$171;
-   sampel kandidat sangat kecil (34–49 tr/tahun); definisi PDH/PDL dipilih pasca-melihat
-   data 2025–26 (risiko data-snooping); WR 73,3% pada n=45 masih bisa bergerak jauh.
-4. Langkah berikut (satu per satu, gerbang sama): (a) exit 2-tier untuk V7T (WR tinggi →
-   cocok untuk TP lebih dekat + runner); (b) uji EMA200-harian vs SMA200-harian pada V7T;
-   (c) validasi stabilitas seed kontrol acak (multi-seed); (d) forward-test DEMO 3 bulan
-   sebelum menilai ulang status live.
+   anti-optimis aktif) — 24 varian (rev 1–2.2) + kontrol acak + uji lintas rezim + Monte-Carlo
+   32-seed + sensitivitas batas optimis.
+2. **Kandidat DEMO utama (rev 2.2): V7E** — H1 bias EMA200 → sweep PDH/PDL fresh (jendela
+   2 bar) → CHoCH M15 → displacement/FVG M5 → **filter tren EMA200-harian** → eksekusi open
+   candle M5, exit 4-tier plan. 49 tr/tahun, WR 71,4%, PF 1,98, +$1.434/tahun (risk 1%),
+   DD 3,1%, **kumulatif 3 periode +$2.117** (terbaik sepanjang seri), signifikan vs 32-seed
+   acak di dua rezim (p=0,000 keduanya). Alternatif: **V7TA** (exit 2-tier TP 100/200,
+   PF 2,04, kumulatif +$1.796) dan **V7T** (SMA200-harian, +$1.668). W24h tetap DITOLAK.
+3. **Status: DEMO saja, RISK MAKS 1%** (penegasan pengguna 08 Sep 2026). Tidak ada rekomendasi
+   risk 5%. Alasan tidak naik ke live: **2022–23 seluruh keluarga rugi dan di bawah rata-rata
+   acak** (kelemahan rezim recovery belum teratasi); sampel kandidat kecil (34–51 tr/tahun);
+   definisi PDH/PDL dipilih pasca-melihat data 2025–26 (risiko data-snooping).
+4. Langkah berikut: (a) **forward-test DEMO ≥3 bulan** pada V7E (jalur keputusan live);
+   (b) riset filter volatilitas/regime (ADX, lebar range harian) untuk menambal 2022–23;
+   (c) reproduksi multiseed berkala saat data baru masuk.
 
-## 10. REPRODUCIBILITY
+## 11. REPRODUCIBILITY
 
 ```
 # eksekusi M5 (default rev 2) — periode utama, 12 varian + kontrol acak
@@ -330,6 +398,15 @@ rekomendasi tetap risk 1% (sampel kecil; 2022–23 masih minus).
 .venv/bin/python research/tuning_mtf.py --start 2025-09-01 --end "2026-09-01 23:59:59" \
     --risk 100 --variants V7,V7T,W24h --tp_first
 
+# [REV 2.2] exit 2-tier + EMA200-harian (risk 1%)
+.venv/bin/python research/tuning_mtf.py --start 2025-09-01 --end "2026-09-01 23:59:59" \
+    --risk 100 --random --variants V7T,V7E,V7TA,V7TB,V7TC,V7TD,V7TE
+
+# [REV 2.2] Monte-Carlo 32-seed vs kandidat (gerbang signifikansi) — 3 rezim
+.venv/bin/python research/multiseed_check.py --start 2025-09-01 --end "2026-09-01 23:59:59" --risk 100 --seeds 32
+.venv/bin/python research/multiseed_check.py --start 2021-09-01 --end "2022-09-01 23:59:59" --risk 100 --seeds 32
+.venv/bin/python research/multiseed_check.py --start 2022-09-01 --end "2023-09-01 23:59:59" --risk 100 --seeds 32
+
 # unit test eksekusi M5 + regresi engine
 .venv/bin/python research/test_exec_m5.py
 .venv/bin/python research/test_antirepaint.py
@@ -357,3 +434,10 @@ Perubahan kode rev 2 (semua additif; default = perilaku lama; regresi hijau):
 - `research/tuning_mtf.py` [rev 2.1] — varian grid `W10m..W24h`, kombinasi `V7T/V8T`
   (`trend_filter="sma200d"`, kolom via `add_filter_columns`), flag `--tp_first`,
   lookup varian case-insensitive.
+- `research/tuning_mtf.py` [rev 2.2] — varian `V7E` (EMA200-harian), `V7TA..V7TE`
+  (exit 2-tier & TP1+runner; 2-tier murni konfigurasi r3=0 — tanpa perubahan engine).
+- `research/multiseed_check.py` [rev 2.2, BARU] — Monte-Carlo multi-seed: kandidat vs
+  distribusi K kontrol acak (geometri & jumlah entry identik), p-value empiris satu sisi.
+- Artefak rev 2.2: `reports/tuning_mtf_exit2t_..._execm5.txt`, `tuning_mtf_tpfirst2_..._execm5.txt`,
+  `multiseed_mtf_20250901_20260901_risk100.txt`, `multiseed_mtf_20210901_20220901_risk100.txt`,
+  `multiseed_mtf_20220901_20230901_risk100.txt`.

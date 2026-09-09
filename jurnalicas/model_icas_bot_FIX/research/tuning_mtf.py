@@ -86,6 +86,26 @@ VARIANTS = {
     "V7T":  ("V7 + filter tren SMA200-harian", {"mtf_m30_mode": "pd", "trend_filter": "sma200d"}),
     "V8T":  ("V8 + filter tren SMA200-harian", {"mtf_m30_mode": "pd", "mtf_sweep_bars": 48,
                                                 "trend_filter": "sma200d"}),
+    # ---- [REV 2.2] exit 2-tier / TP1+runner / EMA200-harian utk V7T ----
+    # 2-tier = r3=0 -> setelah TP2 remaining 0 -> posisi TP-FULL di tp2 (tanpa engine change).
+    # TP1+runner = tp2/tp3 tak terjangkau -> 40% lot jalan hanya dengan trailing.
+    "V7E":  ("V7 + filter tren EMA200-harian", {"mtf_m30_mode": "pd", "trend_filter": "ema200d"}),
+    "V7TA": ("V7T exit 2-tier TP 100/200 (50/50)",
+             {"mtf_m30_mode": "pd", "trend_filter": "sma200d",
+              "tp1_pips": 100.0, "tp2_pips": 200.0, "r1": 0.50, "r2": 0.50, "r3": 0.0}),
+    "V7TB": ("V7T exit 2-tier TP 100/300 (50/50)",
+             {"mtf_m30_mode": "pd", "trend_filter": "sma200d",
+              "tp1_pips": 100.0, "tp2_pips": 300.0, "r1": 0.50, "r2": 0.50, "r3": 0.0}),
+    "V7TC": ("V7T exit 2-tier TP 125/250 (50/50)",
+             {"mtf_m30_mode": "pd", "trend_filter": "sma200d",
+              "tp1_pips": 125.0, "tp2_pips": 250.0, "r1": 0.50, "r2": 0.50, "r3": 0.0}),
+    "V7TD": ("V7T exit 2-tier TP 100/187.5 (60/40)",
+             {"mtf_m30_mode": "pd", "trend_filter": "sma200d",
+              "tp1_pips": 100.0, "tp2_pips": 187.5, "r1": 0.60, "r2": 0.40, "r3": 0.0}),
+    "V7TE": ("V7T TP1 cepat 100 (60%) + runner trail 40%",
+             {"mtf_m30_mode": "pd", "trend_filter": "sma200d",
+              "tp1_pips": 100.0, "tp2_pips": 10000.0, "tp3_pips": 10000.0,
+              "r1": 0.60, "r2": 0.20, "r3": 0.20}),
 }
 
 
