@@ -411,6 +411,42 @@ class IcasMT5Bridge:
         except Exception:
             return pd.DataFrame()
 
+    def get_latest_candles(self, timeframe: str, count: int = 150) -> pd.DataFrame:
+        """[G4 09 Sep 2026] Generalisasi get_latest_m5_candles untuk timeframe
+        apa pun ("M1"|"M5"|"M15"|"M30"|"H1"|"H4"|"D1").
+
+        Semantik identik A3-01: mode LIVE yang gagal mengambil candle
+        mengembalikan DataFrame KOSONG (siklus di-skip) — tanpa fallback CSV
+        basis. Fallback CSV hanya untuk M5 mode simulasi (tanpa paket MT5).
+        Bar TERAKHIR = bar yang masih berjalan (tick-patched) — pemanggil
+        (strategi G4) membuangnya sebelum evaluasi.
+        """
+        tf_map = {}
+        if MT5_AVAILABLE:
+            tf_map = {"M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5,
+                      "M15": mt5.TIMEFRAME_M15, "M30": mt5.TIMEFRAME_M30,
+                      "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4,
+                      "D1": mt5.TIMEFRAME_D1}
+        tf_key = timeframe.upper()
+        if MT5_AVAILABLE and self.connected and tf_key in tf_map:
+            rates = None
+            try:
+                rates = mt5.copy_rates_from_pos(self.resolved_symbol, tf_map[tf_key], 0, count)
+            except Exception as e:
+                logger.warning(f"copy_rates_from_pos({tf_key}) gagal: {e}")
+                rates = None
+            if rates is not None and len(rates) > 0:
+                df = pd.DataFrame(rates)
+                df['time'] = pd.to_datetime(df['time'], unit='s')
+                return df
+            logger.warning(f"⚠️ Candle {tf_key} live tidak tersedia (terminal belum "
+                           "sync / koneksi gangguan) — siklus ini dilewati.")
+            return pd.DataFrame()
+        # Mode simulasi: hanya M5 yang punya CSV historis
+        if tf_key == "M5":
+            return self.get_latest_m5_candles(count=count)
+        return pd.DataFrame()
+
     def get_live_deals_history(self, days: int = 7) -> List[Dict[str, Any]]:
         """
         Fetches closed deals history directly from MT5 broker terminal.
@@ -636,6 +672,15 @@ class IcasMT5Bridge:
         if tick["spread"] > self.cfg.MAX_SPREAD_POINTS:
             logger.warning(f"Order rejected: Spread ({tick['spread']:.1f} pts) exceeds maximum allowable ({self.cfg.MAX_SPREAD_POINTS} pts).")
             return None
+        # [G4 09 Sep 2026] Guard USD (terminal XAUUSDm 3-digit: 1 point = $0.001
+        # sehingga guard points lama menyesatkan). $1.20 = guard seluruh backtest.
+        _max_spread_usd = getattr(self.cfg, "MAX_SPREAD_USD", None)
+        if _max_spread_usd is not None:
+            _spread_usd = tick["spread"] * self.get_point()
+            if _spread_usd > float(_max_spread_usd):
+                logger.warning(f"Order rejected: Spread (${_spread_usd:.2f}) exceeds "
+                               f"maximum allowable (${float(_max_spread_usd):.2f}).")
+                return None
 
         norm_lot = self.normalize_lot(lot_size)
         norm_sl = self.normalize_price(sl_price)

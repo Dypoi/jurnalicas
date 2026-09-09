@@ -39,6 +39,7 @@ from config import config
 from src.execution.mt5_bridge import IcasMT5Bridge
 from src.execution.trade_journal import TradeJournal
 from src.strategy.icas_strategy import ModelIcasStrategy
+from src.strategy.g4_strategy import G4Strategy, frames_from_raw
 from src.indicators.sessions import calculate_session_killzones, is_current_in_burst
 from src.state_store import StateStore
 
@@ -159,7 +160,13 @@ def main():
                            max_bytes=getattr(config, "JOURNAL_MAX_BYTES", 0),
                            keep_rotated=getattr(config, "JOURNAL_KEEP_ROTATED", 5),
                            fsync=getattr(config, "JOURNAL_FSYNC", True))   # [A3-06]
-    strategy = ModelIcasStrategy(config)
+    # [G4 09 Sep 2026] pilih engine sesuai config.STRATEGY:
+    #   "G4"  = kaskade MTF (H1/PDH-PDL-24j/M15/M5) — default baru
+    #   "ICAS" = sinyal lama choch+sesi (rollback)
+    if getattr(config, "STRATEGY", "ICAS") == "G4":
+        strategy = G4Strategy(config)
+    else:
+        strategy = ModelIcasStrategy(config)
 
     # [AUDIT FIX S-03] Persistensi state: pulihkan counter harian & siapkan store
     state_store = StateStore(config.STATE_FILE,
@@ -325,6 +332,49 @@ def main():
 
     consecutive_cycle_errors = 0
     MAX_CYCLE_ERRORS = int(getattr(config, "MAX_CONSECUTIVE_CYCLE_ERRORS", 20))
+
+    # ====================================================================
+    # [G4 09 Sep 2026] Closure pengiriman sinyal — dipakai BERSAMA oleh jalur
+    # evaluasi G4 (kaskade MTF) dan jalur lama ICAS (choch+sesi), agar logika
+    # jurnal + order + state tetap SATU (tidak diduplikasi).
+    # ====================================================================
+    def _emit_and_send(sig, balance: float, spread_usd_now: float) -> None:
+        logger.info(f"⚡ SINYAL TERDETEKSI [{config.STRATEGY}]: {sig.type} | Entry: {sig.entry_price:.2f} | SL: {sig.stop_loss:.2f} | TP1: {sig.tp1_price:.2f} | TP2: {sig.tp2_price:.2f} | TP3: {sig.tp3_price:.2f} | Lot: {sig.lot_size}")
+        journal.log("signal_detected", type=sig.type,
+                    entry=round(sig.entry_price, 4), sl=round(sig.stop_loss, 4),
+                    tp1=round(sig.tp1_price, 4), tp2=round(sig.tp2_price, 4),
+                    tp3=round(sig.tp3_price, 4), lot=sig.lot_size,
+                    spread_usd=round(spread_usd_now, 4), balance=round(balance, 2))
+        ticket = bridge.send_order(sig.type, sig.lot_size, sig.stop_loss, None)
+        if ticket is not None:
+            strategy.daily_trades_count += 1
+            state_store.save_daily(today_str, strategy.daily_trades_count,
+                                   strategy.consecutive_losses)   # [AUDIT FIX S-03]
+            merged_state_tickets.add(ticket)
+            adopted_logged.add(ticket)   # posisi baru sesi ini -> bukan adopsi
+            logger.info(f"✅ Order Berhasil Dieksekusi di MT5! Ticket: {ticket} (Trade Hari Ini: {strategy.daily_trades_count})")
+            # [F-17] harga fill NYATA + slippage terukur
+            _f = getattr(bridge, "last_fill", None) or {}
+            _fp = _f.get("price") or 0.0
+            _slip = None
+            if _fp:
+                _slip = round((_fp - sig.entry_price)
+                              if sig.type == "BUY"
+                              else (sig.entry_price - _fp), 4)
+                if abs(_slip) > 1.0:
+                    logger.warning(f"⚠️ Slippage entry {_slip:+.2f} USD "
+                                   f"({abs(_slip)*10:.0f} pips) — jauh di atas "
+                                   f"asumsi config ${config.SLIPPAGE_USD:.2f}.")
+            journal.log("order_open", ticket=ticket, type=sig.type,
+                        lot=sig.lot_size, entry=round(sig.entry_price, 4),
+                        fill_price=round(_fp, 4) if _fp else None,
+                        slippage_usd=_slip,
+                        sl=round(sig.stop_loss, 4),
+                        daily_count=strategy.daily_trades_count)
+        else:
+            logger.warning("❌ Order GAGAL dieksekusi MT5 — lihat log bridge di atas.")
+            journal.log("order_failed", type=sig.type, lot=sig.lot_size,
+                        entry=round(sig.entry_price, 4), sl=round(sig.stop_loss, 4))
 
     try:
         while True:
@@ -719,57 +769,59 @@ def main():
             if pos is None and not _blocking:
                 can_trade, reason = strategy.can_trade_today()
                 if can_trade:
-                    df_m5_raw = bridge.get_latest_m5_candles(count=150)
-                    if not df_m5_raw.empty and len(df_m5_raw) >= 15:
-                        df_m5 = calculate_session_killzones(df_m5_raw)
-                        latest_bar_idx = len(df_m5) - 2 # Latest completed candle
-                        latest_time = df_m5['time'].iloc[latest_bar_idx]
+                    if getattr(config, "STRATEGY", "ICAS") == "G4":
+                        # ============================================================
+                        # [G4] KASKADE MTF — evaluasi pada bar M5 yang BARU TERTUTUP.
+                        # frames_from_raw: konversi server->UTC + buang bar berjalan.
+                        # Mutex 1-posisi + evaluasi tepat setelah close M5 =
+                        # perilaku strict_bar_open_entry & manage_entry_bar engine
+                        # riset (lihat research/g4_parity_check.py).
+                        # ============================================================
+                        # M5 1500 (~5,2 hari bursa: sweep 288 + PD penuh utk
+                        # Senin pagi), M15 1000 (~10 hari), H1 5000 (~7 bulan:
+                        # burn-in EMA200-grid < $0,001 — lihat g4_parity_check).
+                        frames = frames_from_raw(
+                            bridge.get_latest_candles("M5", 1500),
+                            bridge.get_latest_candles("M15", 1000),
+                            bridge.get_latest_candles("H1", 5000))
+                        if frames is not None:
+                            df5, df15, dfh1 = frames
+                            if (len(df5) >= 350 and len(df15) >= 20
+                                    and len(dfh1) >= int(getattr(config, "G4_MIN_H1_BARS", 260))):
+                                latest_time = df5.index[-1]
+                                if latest_time != last_scanned_bar_time:
+                                    last_scanned_bar_time = latest_time
+                                    balance = bridge.get_account_balance()
+                                    spread_now = bridge.get_current_tick()
+                                    spread_usd_now = spread_now.get("spread", 0.0) * price_point
+                                    sig = strategy.evaluate(df5, df15, dfh1, balance,
+                                                            spread_usd=spread_usd_now)
+                                    if sig is not None:
+                                        _emit_and_send(sig, balance, spread_usd_now)
+                            else:
+                                logger.warning("⚠️ [G4] Riwayat M5/M15/H1 belum cukup "
+                                               "(butuh >=350 M5 / 20 M15 / 260 H1) — "
+                                               "sinyal dilewati siklus ini.")
+                    else:
+                        # ============================================================
+                        # [ICAS legacy] sinyal choch + sesi Asia/London (rollback)
+                        # ============================================================
+                        df_m5_raw = bridge.get_latest_m5_candles(count=150)
+                        if not df_m5_raw.empty and len(df_m5_raw) >= 15:
+                            df_m5 = calculate_session_killzones(df_m5_raw)
+                            latest_bar_idx = len(df_m5) - 2 # Latest completed candle
+                            latest_time = df_m5['time'].iloc[latest_bar_idx]
 
-                        if latest_time != last_scanned_bar_time:
-                            last_scanned_bar_time = latest_time
-                            balance = bridge.get_account_balance()
-                            spread_now = bridge.get_current_tick()
-                            spread_usd_now = spread_now.get("spread", 0.0) * price_point
-                            sig = strategy.evaluate_m5_setup(df_m5, latest_bar_idx, balance,
-                                                             spread_usd=spread_usd_now)
+                            if latest_time != last_scanned_bar_time:
+                                last_scanned_bar_time = latest_time
+                                balance = bridge.get_account_balance()
+                                spread_now = bridge.get_current_tick()
+                                spread_usd_now = spread_now.get("spread", 0.0) * price_point
+                                sig = strategy.evaluate_m5_setup(df_m5, latest_bar_idx, balance,
+                                                                 spread_usd=spread_usd_now)
 
-                            if sig is not None:
-                                logger.info(f"⚡ SINYAL TERDETEKSI: {sig.type} | Entry: {sig.entry_price:.2f} | SL: {sig.stop_loss:.2f} | TP1: {sig.tp1_price:.2f} | TP2: {sig.tp2_price:.2f} | TP3: {sig.tp3_price:.2f} | Lot: {sig.lot_size}")
-                                journal.log("signal_detected", type=sig.type,
-                                            entry=round(sig.entry_price, 4), sl=round(sig.stop_loss, 4),
-                                            tp1=round(sig.tp1_price, 4), tp2=round(sig.tp2_price, 4),
-                                            tp3=round(sig.tp3_price, 4), lot=sig.lot_size,
-                                            spread_usd=round(spread_usd_now, 4), balance=round(balance, 2))
-                                ticket = bridge.send_order(sig.type, sig.lot_size, sig.stop_loss, None)
-                                if ticket is not None:
-                                    strategy.daily_trades_count += 1
-                                    state_store.save_daily(today_str, strategy.daily_trades_count,
-                                                           strategy.consecutive_losses)   # [AUDIT FIX S-03]
-                                    merged_state_tickets.add(ticket)
-                                    adopted_logged.add(ticket)   # posisi baru sesi ini -> bukan adopsi
-                                    logger.info(f"✅ Order Berhasil Dieksekusi di MT5! Ticket: {ticket} (Trade Hari Ini: {strategy.daily_trades_count})")
-                                    # [F-17] harga fill NYATA + slippage terukur
-                                    _f = getattr(bridge, "last_fill", None) or {}
-                                    _fp = _f.get("price") or 0.0
-                                    _slip = None
-                                    if _fp:
-                                        _slip = round((_fp - sig.entry_price)
-                                                      if sig.type == "BUY"
-                                                      else (sig.entry_price - _fp), 4)
-                                        if abs(_slip) > 1.0:
-                                            logger.warning(f"⚠️ Slippage entry {_slip:+.2f} USD "
-                                                           f"({abs(_slip)*10:.0f} pips) — jauh di atas "
-                                                           f"asumsi config ${config.SLIPPAGE_USD:.2f}.")
-                                    journal.log("order_open", ticket=ticket, type=sig.type,
-                                                lot=sig.lot_size, entry=round(sig.entry_price, 4),
-                                                fill_price=round(_fp, 4) if _fp else None,
-                                                slippage_usd=_slip,
-                                                sl=round(sig.stop_loss, 4),
-                                                daily_count=strategy.daily_trades_count)
-                                else:
-                                    logger.warning("❌ Order GAGAL dieksekusi MT5 — lihat log bridge di atas.")
-                                    journal.log("order_failed", type=sig.type, lot=sig.lot_size,
-                                                entry=round(sig.entry_price, 4), sl=round(sig.stop_loss, 4))
+                                if sig is not None:
+                                    _emit_and_send(sig, balance, spread_usd_now)
 
             consecutive_cycle_errors = 0
           except KeyboardInterrupt:

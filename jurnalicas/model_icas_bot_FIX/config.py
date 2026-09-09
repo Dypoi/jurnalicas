@@ -12,6 +12,21 @@ from dataclasses import dataclass
 
 @dataclass
 class IcasConfig:
+    # ===================== [STRATEGI G4 — 09 Sep 2026] =====================
+    # "G4"  = kaskade MTF H1→M30(PDH/PDL 24j)→M15 CHoCH→M5 displacement,
+    #         eksekusi M5, trailing cepat 50/30, risk 1% (LAPORAN_TUNING_SCALPING.md:
+    #         1.338 tr/thn | WR 73.0% | PF 1.12 | +$4.493 | DD 19.5% | p=0.000
+    #         vs 32-seed acak; ~103 entry/bulan = scalping 3-4/hari aktif).
+    # "ICAS" = sinyal lama choch+sesi Asia/London (PF 0.92 setahun — kalah dari
+    #         acak; dipertahankan hanya untuk rollback/perbandingan).
+    STRATEGY: str = "G4"
+    # Konstanta kaskade G4 (identik engine riset — JANGAN diubah tanpa ulang
+    # parity test research/g4_parity_check.py):
+    G4_SWEEP_BARS: int = 288              # jendela sweep PDH/PDL = 288 bar M5 (24 jam)
+    G4_FVG_BUFFER_USD: float = 0.30       # buffer Fair Value Gap ($0.30 = 3 pips)
+    G4_H1_EMA_SPAN: int = 200             # span EMA bias H1
+    G4_MIN_H1_BARS: int = 260             # bar H1 minimum sebelum EMA dianggap valid
+
     # Broker & Connection Settings
     SYMBOL: str = "XAUUSDm"                   # Auto-detects XAUUSD, GOLD, XAUUSDm on MT5
     TIMEFRAME: str = "M5"                     # Primary execution timeframe
@@ -22,8 +37,10 @@ class IcasConfig:
     MT5_PATH: str = os.getenv("MT5_PATH", "")
 
     # Risk Management Settings (Strict 1 Signal 1 Position)
+    # [G4 09 Sep 2026] risk 5% -> 1% (instruksi pengguna: risk maks 1%;
+    # backtest G4: risk 2x profit = DD 2x; kapital $10k -> $100/trade)
     INITIAL_CAPITAL: float = 10000.0          # Initial balance base
-    RISK_PER_TRADE_PCT: float = 0.05          # 5.0% Risk per trade ($500 per order on $10k base)
+    RISK_PER_TRADE_PCT: float = 0.01          # 1.0% Risk per trade ($100 per order on $10k base)
     USE_COMPOUNDING: bool = False             # False = Fixed $500/trade (Recommended), True = Dynamic Equity
     MAX_TRADES_PER_DAY: int = 999             # Set 999 for Unlimited trades
     MAX_CONSECUTIVE_LOSSES: int = 999         # Set 999 to disable circuit breaker
@@ -56,8 +73,10 @@ class IcasConfig:
     STEP_SL_TO_TP1_ON_TP3: bool = True        # When TP3 is hit, SL is stepped up to TP1 (+20 pips)
     
     RUNNER_LOT_RATIO: float = 0.20            # Remaining 20% lot runs with Step Trailing Stop
-    TRAILING_STEP_PIPS: float = 100.0         # Advance trailing stop every 100 pips ($10.00) running profit
-    TRAILING_LOCK_PIPS: float = 30.0          # Lock 30 pips ($3.00) profit per 100-pip milestone
+    # [G4 09 Sep 2026] trailing 100 -> 50 (tuning scalping: realisasi scratch lebih
+    # sering, runner tetap hidup; WR 73% vs 61% pada 56% lebih banyak trade)
+    TRAILING_STEP_PIPS: float = 50.0          # Advance trailing stop every 50 pips ($5.00) running profit
+    TRAILING_LOCK_PIPS: float = 30.0          # Lock 30 pips ($3.00) profit per 50-pip milestone
 
     # Session Killzone Filter:
     USE_KILLZONE: bool = False                # False = 24H Full-Market trading
@@ -72,7 +91,12 @@ class IcasConfig:
     NY_BURST_END_MIN_SERVER: int = 30
 
     # Spread Guard (Exness Standard ~ 260 points = $2.60)
-    MAX_SPREAD_POINTS: float = 350.0          # Maximum allowable spread before entry (35 pips / $3.50)
+    # [G4 09 Sep 2026] Guard kini berbasis USD (terminal XAUUSDm 3-digit:
+    # 1 point = $0.001, guard berbasis points menyesatkan). $1.20 = guard yang
+    # dipakai SELURUH backtest tuning. MAX_SPREAD_POINTS (legacy) tetap untuk
+    # tampilan; send_order memakai MAX_SPREAD_USD bila tersedia.
+    MAX_SPREAD_USD: float = 1.20             # Maximum allowable spread before entry (USD)
+    MAX_SPREAD_POINTS: float = 350.0          # Legacy (tampilan/rollback ICAS)
 
     # Dashboard & Polling
     POLL_INTERVAL_SECONDS: int = 3            # Live execution daemon polling frequency
@@ -145,9 +169,12 @@ class IcasConfig:
     JOURNAL_PNL_BACKFILL_MAX_ATTEMPTS: int = 120      # ~1 jam @ interval 30 dtk
 
     # ============================================================================
-    # [ENGINE BARU v2 "SWING-150" — 25 Agu 2026] Identitas + Jurnal Observasi JSON
+    # [ENGINE v3 "G4" — 09 Sep 2026] Identitas + Jurnal Observasi JSON
     # ============================================================================
-    ENGINE_VERSION: str = "icas-v2-swing150-c (kalibrasi 25 Agu 2026)"
+    # G4 = kaskade MTF H1 -> sweep PDH/PDL 24j -> CHoCH M15 -> displacement M5,
+    # eksekusi M5, trailing 50/30, risk 1%. Paritas sinyal vs engine riset
+    # diverifikasi research/g4_parity_check.py (identik bar-per-bar, setahun).
+    ENGINE_VERSION: str = "icas-v3-g4 (MTF H1/PD24j/M15/M5 + trail 50/30, 09 Sep 2026)"
     JOURNAL_ENABLED: bool = True              # Jurnal JSONL ke logs/trade_journal.jsonl
     JOURNAL_FILE: str = "logs/trade_journal.jsonl"
     JOURNAL_EQUITY_SNAPSHOT_SECONDS: int = 900  # Telemetri modal tiap 15 menit
