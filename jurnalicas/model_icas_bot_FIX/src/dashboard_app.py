@@ -23,7 +23,6 @@ import os
 import time
 from config import config
 from src.indicators.sessions import calculate_session_killzones, is_current_in_burst
-from src.strategy.icas_strategy import ModelIcasStrategy
 from src.execution.mt5_bridge import IcasMT5Bridge
 from src.backtest.engine import IcasBacktestEngine
 
@@ -31,8 +30,21 @@ app = Flask(__name__, template_folder='../templates')
 
 bridge = IcasMT5Bridge(config)
 bridge.initialize()
-strategy_engine = ModelIcasStrategy(config)
+# [D6-02] Instance ModelIcasStrategy DIHAPUS: dashboard adalah PROSES TERPISAH
+# dari daemon — strategy_engine.daily_trades_count di dashboard SELALU 0
+# (counter milik daemon, bukan proses ini) sehingga field API menyesatkan.
+# Sumber benar = jurnal daemon (orders_today) — lihat api_status.
 price_point = bridge.get_point()   # [D-01] digit-aware: 0.01 (2-digit) / 0.001 (XAUUSDm 3-digit)
+
+# [D6-07] Zona waktu server diambil dari tz-database Europe/Athens — SAMA
+# dengan yang dipakai daemon G4 (frames_from_raw). Sebelumnya offset manual
+# via config.SERVER_TIME_OFFSET_HOURS yang harus diubah user dua kali setahun
+# saat DST dan bisa tidak sinkron dengan daemon.
+try:
+    from zoneinfo import ZoneInfo
+    _ATHENS_TZ = ZoneInfo("Europe/Athens")
+except Exception:
+    _ATHENS_TZ = None
 
 ENGINE_VERSION = getattr(config, "ENGINE_VERSION", "icas-v2")
 JOURNAL_FILE = getattr(config, "JOURNAL_FILE", "logs/trade_journal.jsonl")
@@ -52,6 +64,10 @@ def _auth_guard():
 
 _cached_trades = []
 _cached_stats = {}
+# [D6-05] Negative-cache backtest: tanpa ini, setiap kegagalan engine.run
+# (CSV korup / format berubah) diulang TANPA henti pada tiap poll /api/stats
+# (5 detik) — backtest penuh dijalankan ulang berkali-kali = CPU burn.
+_backtest_failed = False
 
 
 def _journal_health():
@@ -283,6 +299,11 @@ def _stats_from_live_deals():
         "total_trades": total, "wins": len(wins), "be_trades": len(scratch),
         "losses": len(losses),
         "win_rate": round(len(wins) / total * 100.0, 2) if total else 0,
+        # [D6-04] be_rate & non_loss_rate disediakan server agar template TIDAK
+        # menghitung ulang dari be_activations (flag) yang salah semantik utk
+        # rasio — konsisten dgn _stats_from_journal.
+        "be_rate": round(len(scratch) / total * 100.0, 2) if total else 0,
+        "non_loss_rate": round((len(wins) + len(scratch)) / total * 100.0, 2) if total else 0,
         "profit_factor": round(pf, 2), "net_profit": round(gw - gl, 2),
         "be_activations": len(scratch),
     }
@@ -294,7 +315,7 @@ def _stats_from_live_deals():
 
 
 def get_backtest_summary():
-    global _cached_trades, _cached_stats
+    global _cached_trades, _cached_stats, _backtest_failed
 
     # [D-03] Prioritas sumber: JURNAL ENGINE v2 (observasi demo) paling akurat...
     j_trades, j_stats = _stats_from_journal()
@@ -311,9 +332,12 @@ def get_backtest_summary():
 
     if _cached_stats:
         return _cached_trades, _cached_stats
+    if _backtest_failed:
+        return [], {}                       # [D6-05] jangan ulangi backtest gagal
 
     csv_path = 'data/historical/xauusd_m5.csv'
     if not os.path.exists(csv_path):
+        _backtest_failed = True             # [D6-05] CSV tak ada = kondisi menetap
         return [], {}
 
     try:
@@ -383,6 +407,7 @@ def get_backtest_summary():
         print(f"Error computing backtest stats: {e}")
         _cached_stats = {}
         _cached_trades = []
+        _backtest_failed = True     # [D6-05] gagal sekali -> jangan diulang tiap poll
         
     return _cached_trades, _cached_stats
 
@@ -419,13 +444,17 @@ def index():
 
 @app.route('/api/status')
 def api_status():
-    # [AUDIT FIX R-02] utcnow() deprecated di py3.12+; offset server diturunkan
-    # dari config.SERVER_TIME_OFFSET_HOURS (bukan hardcode UTC+3, aman saat DST).
+    # [D6-07] Jam server broker dari tz-database Europe/Athens (identik daemon
+    # G4). Fallback ke offset manual lama hanya bila zoneinfo tak tersedia.
     now_utc = datetime.datetime.now(datetime.timezone.utc)
-    server_utc_shift = 7 - config.SERVER_TIME_OFFSET_HOURS   # WIB(UTC+7) minus offset WIB->server
-    server_hour = (now_utc.hour + server_utc_shift) % 24
-    server_min = now_utc.minute
-    server_sec = now_utc.second
+    if _ATHENS_TZ is not None:
+        now_srv = datetime.datetime.now(_ATHENS_TZ)
+        server_hour, server_min, server_sec = now_srv.hour, now_srv.minute, now_srv.second
+    else:
+        server_utc_shift = 7 - config.SERVER_TIME_OFFSET_HOURS   # WIB(UTC+7) minus offset WIB->server
+        server_hour = (now_utc.hour + server_utc_shift) % 24
+        server_min = now_utc.minute
+        server_sec = now_utc.second
     wib_hour = (now_utc.hour + 7) % 24
     
     in_burst = is_current_in_burst(server_hour, server_min)
@@ -442,21 +471,30 @@ def api_status():
     pos = bridge.get_open_position_details()
 
     pos_data = None
+    # [D6-08] Feed mati (tick invalid / bid-ask 0) TIDAK boleh dipakai menghitung
+    # fav/pnl: cur_price=0 menghasilkan fav ±$4.000-an dan pnl ratusan ribu dolar
+    # yang tampil di banner posisi (bug kelas yang sama dgn F-04 di daemon).
+    tick_ok = bool(tick.get("valid", True)) and tick.get("bid", 0.0) > 0 and tick.get("ask", 0.0) > 0
     if pos is not None:
         # [A3-04] flag manajemen (tp1_hit/be_set/trail_step) diambil dari state
         # daemon — bridge dashboard tidak mengetahuinya (proses terpisah).
         st_snap = _read_state_positions().get(str(pos.get("ticket"))) or {}
-        cur_price = tick["bid"] if pos["type"] == "BUY" else tick["ask"]
-        ep = pos["price_open"]
-        fav_usd = (cur_price - ep) if pos["type"] == "BUY" else (ep - cur_price)
-        fav_pips = round(fav_usd * 10.0, 1)
-        pnl_usd = round(fav_usd * pos["volume"] * 100.0, 2)
+        if tick_ok:
+            cur_price = tick["bid"] if pos["type"] == "BUY" else tick["ask"]
+            ep = pos["price_open"]
+            fav_usd = (cur_price - ep) if pos["type"] == "BUY" else (ep - cur_price)
+            fav_pips = round(fav_usd * 10.0, 1)
+            pnl_usd = round(fav_usd * pos["volume"] * 100.0, 2)
+            cur_price_out = round(cur_price, 2)
+        else:
+            fav_pips = pnl_usd = None
+            cur_price_out = None
         pos_data = {
             "ticket": pos["ticket"],
             "type": pos["type"],
             "volume": pos["volume"],
-            "entry": round(ep, 2),
-            "current_price": round(cur_price, 2),
+            "entry": round(pos["price_open"], 2),
+            "current_price": cur_price_out,
             "sl": round(pos["sl"], 2),
             "fav_pips": fav_pips,
             "pnl_usd": pnl_usd,
@@ -464,12 +502,41 @@ def api_status():
             "tp1_hit": bool(st_snap.get("tp1_hit", pos.get("tp1_hit", False))),
             "tp2_hit": bool(st_snap.get("tp2_hit", pos.get("tp2_hit", False))),
             "tp3_hit": bool(st_snap.get("tp3_hit", pos.get("tp3_hit", False))),
-            "trail_step": int(st_snap.get("trail_step", pos.get("trail_step", 0)) or 0)
+            "trail_step": int(st_snap.get("trail_step", pos.get("trail_step", 0)) or 0),
+            "feed_valid": tick_ok,
+            "feed_reason": None if tick_ok else tick.get("reason", "no_tick"),
         }
+
+    # [D6-03] Status spread berbasis USD — konsisten dgn guard ENTRY live
+    # (bridge.send_order memakai MAX_SPREAD_USD). Perbandingan points lama
+    # (MAX_SPREAD_POINTS=350) kontradiktif di feed 2-digit maupun 3-digit:
+    # 2-digit 130 pts ($1,30) ditolak bot tapi dilabel "NORMAL"; 3-digit
+    # 300 pts ($0,30) aman tapi bisa dilabel "TINGGI".
+    spread_usd_now = round(tick["spread"] * price_point, 2)
+    max_spread_usd = float(getattr(config, "MAX_SPREAD_USD", 0.0) or 0.0)
+    if max_spread_usd > 0:
+        spread_status = ("NORMAL (Aman) ✅" if spread_usd_now <= max_spread_usd
+                         else f"TINGGI ⚠️ (> ${max_spread_usd:.2f})")
+    else:
+        spread_status = ("NORMAL (Aman) ✅" if tick["spread"] <= config.MAX_SPREAD_POINTS
+                         else "TINGGI ⚠️")
+
+    # [D6-02] daily_trades_count dari JURNAL daemon (order_open hari ini) —
+    # bukan dari instance strategi lokal proses dashboard yang selalu 0.
+    js = journal_summary()
 
     return jsonify({
         "status": "RUNNING",
         "engine_version": ENGINE_VERSION,
+        # [D6-11] strategi aktif + parameter kaskade G4 (dashboard harus
+        # mencerminkan STRATEGY yang sedang dijalankan daemon via config).
+        "strategy": getattr(config, "STRATEGY", "ICAS"),
+        "g4": {
+            "sweep_bars": int(getattr(config, "G4_SWEEP_BARS", 288)),
+            "fvg_buffer_usd": float(getattr(config, "G4_FVG_BUFFER_USD", 0.30)),
+            "h1_ema_span": int(getattr(config, "G4_H1_EMA_SPAN", 200)),
+            "min_h1_bars": int(getattr(config, "G4_MIN_H1_BARS", 260)),
+        },
         "symbol": bridge.resolved_symbol,
         "timeframe": config.TIMEFRAME,
         "macro_timeframe": config.MACRO_TIMEFRAME,
@@ -482,9 +549,10 @@ def api_status():
         "ask": round(tick["ask"], 2),
         "spread_points": round(tick["spread"], 1),
         # [D-01] digit-aware: spread_usd = points x point simbol (bukan x0.01 tetap)
-        "spread_usd": round(tick["spread"] * price_point, 2),
+        "spread_usd": spread_usd_now,
         "price_point": price_point,
-        "spread_status": "NORMAL (Aman) ✅" if tick["spread"] <= config.MAX_SPREAD_POINTS else "TINGGI ⚠️",
+        "max_spread_usd": max_spread_usd,
+        "spread_status": spread_status,
         # [AUDIT FORENSIK 2 — F-04/F-08] visibilitas kesehatan koneksi & jurnal.
         # Sebelumnya dashboard tidak bisa membedakan "harga 0 karena feed mati"
         # dari "harga 0 karena pasar", dan kegagalan tulis jurnal tak terlihat.
@@ -505,9 +573,9 @@ def api_status():
         "tp3_ratio": round(config.TP3_PIPS / max(1e-9, config.STOP_LOSS_PIPS), 2),
         "trailing_step": config.TRAILING_STEP_PIPS,
         "trailing_lock": config.TRAILING_LOCK_PIPS,
-        "journal": journal_summary(),
+        "journal": js,
         "journal_health": _journal_health(),
-        "daily_trades_count": strategy_engine.daily_trades_count,
+        "daily_trades_count": js.get("orders_today", 0),
         "active_position": pos_data
     })
 
@@ -573,7 +641,10 @@ def run_server(host=config.DASHBOARD_HOST, port=config.DASHBOARD_PORT):
         print("⚠️  [SECURITY] Dashboard terbuka ke SELURUH jaringan tanpa token!")
         print("                Set ICAS_DASH_TOKEN=<rahasia> lalu akses http://<host>:"
               f"{port}/?token=<rahasia> , atau bind ke 127.0.0.1 untuk pemakaian lokal.")
-    app.run(host=host, port=port, debug=False)
+    # [D6-06] threaded=True: werkzeug defaultnya single-thread — satu request
+    # /api/status yang lambat (file I/O jurnal + tick MT5 saat feed stall)
+    # memblokir SEMUA poll lain dan UI terasa mati total.
+    app.run(host=host, port=port, debug=False, threaded=True)
 
 if __name__ == '__main__':
     run_server()

@@ -97,6 +97,8 @@
                 <h1>⚡ MODEL ICAS AUTONOMOUS BOT</h1>
                 <span class="badge badge-gold">XAUUSD M5</span>
                 <span class="badge badge-blue" id="engine-ver">ENGINE: ...</span>
+                <!-- [D6-11] strategi aktif (G4/ICAS) dirender dari /api/status -->
+                <span class="badge badge-purple" id="strategy-badge">STRATEGY: ...</span>
                 <span class="badge badge-red" id="engine-state-badge">STATUS: ...</span>
             </div>
             <div style="display: flex; gap: 10px; align-items: center; font-size: 12px;">
@@ -104,6 +106,8 @@
                 <div>Server: <strong id="server-time" style="color: var(--text-sub);">--:--:--</strong></div>
                 <span id="session-badge" class="badge badge-blue">Session Active</span>
                 <span id="kz-badge" class="badge badge-gold">24H Full Market</span>
+                <!-- [D6-03/D6-11] spread live dalam USD + status vs guard entry bot -->
+                <span id="spread-badge" class="badge badge-live">SPREAD: --</span>
             </div>
         </div>
 
@@ -117,9 +121,9 @@
                         <span id="acc-mode-badge" class="badge badge-live" style="margin-left: 6px;">DEMO</span>
                     </div>
                     <div class="acc-meta">
-                        Login: <strong id="acc-login-val" style="color: var(--text-main);">88921045</strong> | 
-                        Server: <strong id="acc-server-val">Exness-MT5Trial6</strong> | 
-                        Leverage: <strong id="acc-leverage-val">1:2000</strong>
+                        Login: <strong id="acc-login-val" style="color: var(--text-main);">…</strong> | 
+                        Server: <strong id="acc-server-val">…</strong> | 
+                        Leverage: <strong id="acc-leverage-val">…</strong>
                     </div>
                 </div>
             </div>
@@ -203,6 +207,16 @@
             </div>
 
             <div class="side-panel">
+                <!-- [D6-11] Kaskade G4 — hanya tampil saat STRATEGY == G4 -->
+                <div class="panel-box" id="g4-panel" style="display: none;">
+                    <div class="panel-title">🧭 Kaskade Sinyal G4 (MTF)</div>
+                    <div class="info-row"><span class="info-label">L1 · Bias H1</span><span class="info-val" id="g4-l1">EMA200 close H1</span></div>
+                    <div class="info-row"><span class="info-label">L2 · Likuiditas 24 jam</span><span class="info-val val-gold" id="g4-l2">…</span></div>
+                    <div class="info-row"><span class="info-label">L3 · Struktur</span><span class="info-val">CHoCH swing 5-bar M15</span></div>
+                    <div class="info-row"><span class="info-label">L4 · Trigger</span><span class="info-val" id="g4-l4">…</span></div>
+                    <div class="info-row"><span class="info-label">Guard Spread Entry</span><span class="info-val val-green" id="g4-guard">…</span></div>
+                </div>
+
                 <!-- Protocol Rules (D-02: semua nilai DINAMIS dari engine aktif — tak ada hardcode legacy) -->
                 <div class="panel-box">
                     <div class="panel-title">🛡️ 4-Tier Target Protocols <span id="cfg-engine" style="font-size: 10px; color: var(--text-sub);"></span></div>
@@ -273,6 +287,11 @@
         function apiUrl(path) {
             return AUTH_TOKEN ? path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(AUTH_TOKEN) : path;
         }
+        // [D6-10] Escape HTML utk semua nilai jurnal/broker yang dirender via
+        // innerHTML (hardening XSS — sumber data teks dari file jurnal).
+        function esc(s) {
+            return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
         // [D-02] Parameter engine aktif (diisi fetchStatus) — semua label di UI
         // dirender dari sini, BUKAN hardcode. Default = engine v2 SWING-150.
         let CFG = { sl: 150, be: 9999, be_active: false, tp1: 187.5, tp2: 375, tp3: 562.5,
@@ -341,6 +360,30 @@
                     document.getElementById('engine-ver').innerText = d.engine_version.split(' (')[0].toUpperCase();
                     document.getElementById('cfg-engine').innerText = '(' + d.engine_version.split(' (')[0] + ')';
                 }
+                // [D6-11] Badge strategi aktif + panel kaskade G4 + guard spread
+                const stratBadge = document.getElementById('strategy-badge');
+                if (d.strategy) {
+                    stratBadge.innerText = 'STRATEGY: ' + d.strategy;
+                    stratBadge.className = 'badge ' + (d.strategy === 'G4' ? 'badge-purple' : 'badge-blue');
+                }
+                if (d.strategy === 'G4' && d.g4) {
+                    const gp = document.getElementById('g4-panel');
+                    gp.style.display = 'block';
+                    document.getElementById('g4-l1').innerText = 'EMA' + d.g4.h1_ema_span + ' close H1 (min ' + d.g4.min_h1_bars + ' bar)';
+                    document.getElementById('g4-l2').innerText = 'Sweep PDH/PDL @ ' + d.g4.sweep_bars + ' bar M5';
+                    document.getElementById('g4-l4').innerText = 'Displacement + FVG $' + d.g4.fvg_buffer_usd.toFixed(2);
+                    document.getElementById('g4-guard').innerText = d.max_spread_usd > 0 ? ('Maks $' + d.max_spread_usd.toFixed(2) + ' (USD)') : '—';
+                } else {
+                    document.getElementById('g4-panel').style.display = 'none';
+                }
+                // [D6-03] Badge spread live (USD) + status vs guard entry bot
+                const spBadge = document.getElementById('spread-badge');
+                if (typeof d.spread_usd === 'number') {
+                    spBadge.innerText = 'SPREAD: $' + d.spread_usd.toFixed(2);
+                    const spHigh = typeof d.spread_status === 'string' && d.spread_status.startsWith('TINGGI');
+                    spBadge.className = 'badge ' + (spHigh ? 'badge-red' : 'badge-live');
+                    spBadge.title = d.spread_status || '';
+                }
                 CFG = { sl: d.sl_pips, be: d.early_be_pips, be_active: d.be_active,
                         tp1: d.tp1_pips, tp2: d.tp2_pips, tp3: d.tp3_pips,
                         r1: d.tp1_ratio, r2: d.tp2_ratio, r3: d.tp3_ratio,
@@ -380,15 +423,22 @@
                     posBanner.style.display = 'flex';
                     const p = d.active_position;
                     const typeBadge = document.getElementById('pos-type-badge');
-                    typeBadge.innerText = p.type + ' ' + p.volume.toFixed(2) + ' Lots';
+                    typeBadge.innerText = p.type + ' ' + Number(p.volume).toFixed(2) + ' Lots';
                     typeBadge.className = 'badge ' + (p.type === 'BUY' ? 'badge-live' : 'badge-red');
                     document.getElementById('pos-ticket').innerText = '#' + p.ticket;
-                    document.getElementById('pos-entry').innerText = p.entry.toFixed(2);
-                    document.getElementById('pos-sl').innerText = p.sl.toFixed(2);
-                    
+                    document.getElementById('pos-entry').innerText = Number(p.entry).toFixed(2);
+                    document.getElementById('pos-sl').innerText = Number(p.sl).toFixed(2);
+
+                    // [D6-08] Feed mati -> fav/pnl null: tampil "—" + alasan,
+                    // BUKAN pnl ratusan ribu dolar dari harga 0.
                     const pnlEl = document.getElementById('pos-running-pnl');
-                    pnlEl.innerText = (p.fav_pips >= 0 ? '+' : '') + p.fav_pips.toFixed(1) + ' pips ($' + (p.pnl_usd >= 0 ? '+' : '') + p.pnl_usd.toFixed(2) + ')';
-                    pnlEl.className = 'pos-stat-val ' + (p.pnl_usd >= 0 ? 'val-green' : 'val-red');
+                    if (p.fav_pips === null || p.fav_pips === undefined) {
+                        pnlEl.innerText = p.feed_reason ? ('FEED MATI (' + p.feed_reason + ') — harga tidak valid') : '—';
+                        pnlEl.className = 'pos-stat-val val-red';
+                    } else {
+                        pnlEl.innerText = (p.fav_pips >= 0 ? '+' : '') + p.fav_pips.toFixed(1) + ' pips ($' + (p.pnl_usd >= 0 ? '+' : '') + p.pnl_usd.toFixed(2) + ')';
+                        pnlEl.className = 'pos-stat-val ' + (p.pnl_usd >= 0 ? 'val-green' : 'val-red');
+                    }
 
                     // [D-02] Label milestone dinamis mengikuti CFG engine aktif
                     document.getElementById('badge-be').className = 'badge ' + (p.be_set ? 'badge-live' : 'badge-gold');
@@ -418,10 +468,18 @@
                 if (data.stats && data.stats.win_rate) {
                     const st = data.stats;
                     document.getElementById('win-rate-stat').innerText = st.win_rate + '% (' + st.wins + ' W)';
-                    const beRate = ((st.be_activations / st.total_trades) * 100).toFixed(2);
-                    document.getElementById('be-rate-stat').innerText = beRate + '% (' + st.be_activations + ' BE)';
-                    const nonLoss = (((st.wins + st.be_activations) / st.total_trades) * 100).toFixed(2);
-                    document.getElementById('non-loss-stat').innerHTML = nonLoss + '% <span style="font-size: 11px; color: var(--text-sub);">(PF: ' + st.profit_factor + ')</span>';
+                    // [D6-04] Rasio dihitung SERVER (be_rate / non_loss_rate) —
+                    // JS lama memakai be_activations (FLAG per-trade, bukan
+                    // klasifikasi hasil) sehingga Non-Loss Rate bisa salah
+                    // (WIN yang juga be_set terhitung dua kali, rasio >100%).
+                    const beRate = (typeof st.be_rate === 'number')
+                        ? st.be_rate
+                        : (st.total_trades ? ((st.be_activations / st.total_trades) * 100) : 0);
+                    document.getElementById('be-rate-stat').innerText = beRate.toFixed(2) + '% (' + (st.be_trades ?? st.be_activations) + ' BE)';
+                    const nonLoss = (typeof st.non_loss_rate === 'number')
+                        ? st.non_loss_rate
+                        : (st.total_trades ? (((st.wins + (st.be_trades ?? st.be_activations)) / st.total_trades) * 100) : 0);
+                    document.getElementById('non-loss-stat').innerHTML = nonLoss.toFixed(2) + '% <span style="font-size: 11px; color: var(--text-sub);">(PF: ' + st.profit_factor + ')</span>';
                 }
                 // [D-03] Label SUMBER statistik secara eksplisit + peringatan dataset repo
                 if (data.stats && data.stats.source) {
@@ -448,11 +506,11 @@
 
                         // [D-02] Label sel milestone dinamis (bukan 1:1/+20p dsb. legacy)
                         tr.innerHTML = `
-                            <td><strong>${t.time}</strong></td>
-                            <td><span class="badge ${t.type === 'BUY' ? 'badge-live' : 'badge-red'}">${t.type}</span></td>
+                            <td><strong>${esc(t.time)}</strong></td>
+                            <td><span class="badge ${t.type === 'BUY' ? 'badge-live' : 'badge-red'}">${esc(t.type)}</span></td>
                             <td><span class="${tagClass}">${resText}</span></td>
-                            <td class="${t.pnl >= 0 ? 'val-green' : 'val-red'}"><strong>$${t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(2)}</strong></td>
-                            <td>+${t.max_fav.toFixed(1)} pips</td>
+                            <td class="${t.pnl >= 0 ? 'val-green' : 'val-red'}"><strong>$${t.pnl >= 0 ? '+' : ''}${Number(t.pnl).toFixed(2)}</strong></td>
+                            <td>+${Number(t.max_fav).toFixed(1)} pips</td>
                             <td>${t.be_set ? '🛡️ Lock' : '-'}</td>
                             <td>${t.tp1 ? ('🎯 ' + CFG.r1 + 'x (+' + CFG.tp1.toFixed(0) + 'p)') : '-'}</td>
                             <td>${t.tp2 ? ('🎯 ' + CFG.r2 + 'x (+' + CFG.tp2.toFixed(0) + 'p)') : '-'}</td>
@@ -574,9 +632,9 @@
                 box.innerHTML = evs.map(e => {
                     const ic = icons[e.event] || '•';
                     const extra = e.event === 'tp_hit' ? (' L' + e.level) :
-                        (e.realized_total !== undefined ? (' $' + (e.realized_total >= 0 ? '+' : '') + e.realized_total.toFixed(2)) :
+                        (e.realized_total !== undefined ? (' $' + (e.realized_total >= 0 ? '+' : '') + Number(e.realized_total).toFixed(2)) :
                         (e.ticket ? (' #' + e.ticket) : ''));
-                    return `<div style="padding: 2px 0; border-bottom: 1px solid rgba(32,43,59,.4);">${(e.ts||'').slice(5,16).replace('T',' ')} ${ic} ${e.event}${extra}</div>`;
+                    return `<div style="padding: 2px 0; border-bottom: 1px solid rgba(32,43,59,.4);">${esc((e.ts||'').slice(5,16).replace('T',' '))} ${ic} ${esc(e.event)}${extra}</div>`;
                 }).join('');
             } catch (e) { console.error('fetchJournal err:', e); }
         }
