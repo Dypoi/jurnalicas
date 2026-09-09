@@ -72,8 +72,21 @@ cd jurnalicas\model_icas_bot_FIX
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+
+:: 3. Jembatan Python -> terminal MT5 (SEKALI SAJA, di dalam venv)
 pip install MetaTrader5
 ```
+
+> **"Saya sudah punya aplikasi MetaTrader 5 — masih perlu `pip install MetaTrader5`?"**
+> **YA.** Itu dua hal berbeda: **aplikasi MT5** (terminal trading yang sudah Anda
+> punya — grafik, akun, order manual) vs **paket Python `MetaTrader5`** (library
+> kecil di dalam venv yang menjadi jembatan bot Python → terminal Anda). Tanpa
+> paket ini daemon hanya jalan mode simulasi (log: *"MT5 Bridge running in
+> Simulation mode"*) dan **tidak akan trading**. Instalasi ini tidak mengubah
+> aplikasi MT5 Anda sama sekali.
+>
+> NB: perintah berantai `&&` hanya jalan di **CMD** / PowerShell 7+. Di
+> PowerShell lama, jalankan perintah satu per satu.
 
 File penting:
 
@@ -131,15 +144,33 @@ Tidak ada yang wajib diubah untuk menjalankan G4 default.
 
 ## 6. Menjalankan bot
 
-Masih di venv aktif (CMD sesi dengan kredensial ter-set):
+**Urutan lengkap SETIAP KALI menjalankan bot** (bukan sekali klik — ketik di CMD):
 
 ```bat
+:: masuk folder repo
+cd jurnalicas\model_icas_bot_FIX
+
+:: aktifkan venv (prompt berubah jadi (.venv) )
+.venv\Scripts\activate
+
+:: kredensial — OPSIONAL bila terminal MT5 Anda sudah login
+:: (bot mengikuti akun yang aktif di terminal); WAJIB untuk VPS
+set MT5_LOGIN=12345678
+set MT5_PASSWORD=passwordanda
+set MT5_SERVER=Exness-MT5Trial6
+
+:: JALANKAN BOT
 python icas_daemon.py
 ```
 
-atau klik dua kali `run_live.bat` (otomatis aktivasinya).
+> ⚠️ **Jangan klik dua kali `run_live.bat` begitu saja** — file itu membuka
+> jendela baru yang TIDAK mewarisi venv dan env-var sesi CMD Anda, sehingga
+> memakai Python global (deps hilang / kredensial kosong). Selalu jalankan
+> dari CMD dengan venv aktif seperti di atas. Biarkan jendela terbuka 24/5 —
+> itulah bot-nya; jurnal & state tersimpan otomatis, restart aman (posisi
+> di-adopsi kembali via magic number).
 
-**Yang terlihat di log:**
+Setelah start, yang terlihat di log:
 
 - `✅ MT5 Connected successfully! Broker Symbol: XAUUSDm ...` — jembatan siap.
 - Heartbeat tiap menit: `[HEARTBEAT] ... Sinyal Hari Ini: N | Posisi Aktif: 0/1`.
