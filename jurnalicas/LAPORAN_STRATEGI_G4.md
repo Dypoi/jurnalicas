@@ -114,6 +114,28 @@ Catatan penting: sinyal G4 **berkelompok** (median jarak antar sinyal hanya
 10 menit) — mutex membuat 3.562 bar sinyal setahun menjadi 1.338 trade
 nyata; sinyal lanjutan di kluster yang sama otomatis terlewat (by design).
 
+### Guard $1,20 vs Exness nyata (data setahun)
+
+Guard spread **bukan penilaian keamanan broker** — ia filter kualitas
+eksekusi, dan nilainya dikalibrasi dari feed Exness itu sendiri (355.640
+menit M1 bid/ask XAUUSD, 2025-09..2026-09):
+
+| Ukuran | Nilai |
+|---|---|
+| Spread median (semua menit bursa) | **$0,67** |
+| Spread median jam London/NY (09:00–22:00 server) | **$0,60** |
+| Menit yang melebihi $1,20 (diblokir guard) | **3,14%** |
+| Konsentrasi blokir | rollover **00:00–02:00 server**: 25% / 16% / 10% menit |
+| Jam puncak sinyal G4 (03–05, 07–08, 16 server) | median $0,71 · blokir hanya 2,6% |
+
+Artinya: pada kondisi Exness normal guard praktis tak pernah aktif — ia
+hanya menahan entry tepat di jam pelebaran ekstrem (rollover tengah malam,
+news besar), saat entry memang paling berisiko. Rujukan pihak ketiga
+(invesnesia.com, Mar 2026) mencatat spread rata-rata XAUUSD akun Standard
+Exness ± 11 pip (≈$0,11 jarak harga, tanpa komisi) — jauh di bawah guard;
+untuk gold, akun Raw Spread Exness all-in ±$8/lot (spread kecil + komisi
+$7 round-turn) vs Standard ±$11/lot spread-only.
+
 ---
 
 ## 5. Eksekusi entry
