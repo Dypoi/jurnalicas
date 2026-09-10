@@ -26,6 +26,11 @@ class IcasConfig:
     G4_FVG_BUFFER_USD: float = 0.30       # buffer Fair Value Gap ($0.30 = 3 pips)
     G4_H1_EMA_SPAN: int = 200             # span EMA bias H1
     G4_MIN_H1_BARS: int = 260             # bar H1 minimum sebelum EMA dianggap valid
+    G4_MAX_SIGNAL_AGE_SECONDS: int = 120  # [10 Sep 2026] bar sinyal yang tutupnya lebih
+                                          # tua dari ini DILEWATI (eksekusi telat karena
+                                          # koneksi putus = fill tak termodelkan backtest;
+                                          # pelajaran tiket 5075405797: entry 223 dtk
+                                          # setelah close bar -> slippage $2.67)
 
     # Broker & Connection Settings
     SYMBOL: str = "XAUUSDm"                   # Auto-detects XAUUSD, GOLD, XAUUSDm on MT5

@@ -281,6 +281,10 @@ jendela 5.000 bar. Exit code 0 = IDENTIK.)
 | `Order rejected: Spread ($x.xx) exceeds $1.20` | Guard bekerja (jam rollover/news). Sinyal berikutnya tetap diproses. |
 | Tidak ada sinyal berjam-jam | Normal — G4 butuh konfluensi 4 lapis; rerata ~3–4 sinyal/hari bursa. |
 | `python: No module named pandas` | Venv belum aktif → `.venv\Scripts\activate`. |
+| `⏭️ [G4] Bar sinyal BASI dilewati ...` | Koneksi putus/lambat — bar sinyal terlanjur tua (> `G4_MAX_SIGNAL_AGE_SECONDS` 120 dtk) sehingga entry di tengah bar tidak sesuai asumsi backtest. Normal & aman; sinyal berikutnya tetap diproses. Kalau sering muncul: stabilkan internet / pertimbangkan VPS. |
+| `💨 Slippage FAVORABLE -x.xx USD` | Fill LEBIH BAIK dari anchor (mis. SELL isi lebih tinggi) — menguntungkan, bukan bahaya. |
+| `⚠️ Slippage ADVERSE +x.xx USD` | Fill lebih buruk dari anchor. Sekali-sekali (jam news/rollover) wajar; bila RUTIN > $0.50 di jam likuid normal → hentikan & evaluasi eksekusi broker. |
+| `🔧 SL re-anchor ke fill` | Fill menyimpang > $0.50 dari anchor (mis. pasca koneksi putus) — SL digeser agar kembali PERSIS 150 pips dari harga isi, identik engine backtest. |
 
 **Mode simulasi (tanpa MT5):** daemon bisa start, tetapi jalur G4 butuh
 candle M15/H1 live — tanpa MT5 frame kosong dan sinyal di-skip. G4 hanya

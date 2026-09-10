@@ -371,7 +371,10 @@ def main():
             merged_state_tickets.add(ticket)
             adopted_logged.add(ticket)   # posisi baru sesi ini -> bukan adopsi
             logger.info(f"✅ Order Berhasil Dieksekusi di MT5! Ticket: {ticket} (Trade Hari Ini: {strategy.daily_trades_count})")
-            # [F-17] harga fill NYATA + slippage terukur
+            # [F-17] harga fill NYATA + slippage terukur.
+            # Konvensi tanda: POSITIF = adverse (merugikan), NEGATIF = favorable.
+            #   BUY  : slip = fill - anchor  (isi di atas anchor = buruk)
+            #   SELL : slip = anchor - fill  (isi di bawah anchor = buruk)
             _f = getattr(bridge, "last_fill", None) or {}
             _fp = _f.get("price") or 0.0
             _slip = None
@@ -379,10 +382,35 @@ def main():
                 _slip = round((_fp - sig.entry_price)
                               if sig.type == "BUY"
                               else (sig.entry_price - _fp), 4)
-                if abs(_slip) > 1.0:
-                    logger.warning(f"⚠️ Slippage entry {_slip:+.2f} USD "
-                                   f"({abs(_slip)*10:.0f} pips) — jauh di atas "
-                                   f"asumsi config ${config.SLIPPAGE_USD:.2f}.")
+                if _slip > 1.0:
+                    logger.warning(f"⚠️ Slippage ADVERSE +{_slip:.2f} USD "
+                                   f"({_slip*10:.0f} pips) — di atas asumsi "
+                                   f"${config.SLIPPAGE_USD:.2f}. Pantau polanya "
+                                   f"di jurnal (field slippage_usd); bila rutin "
+                                   f"> $0.50 di jam likuid normal, hentikan & evaluasi.")
+                elif _slip < -1.0:
+                    logger.info(f"💨 Slippage FAVORABLE {_slip:+.2f} USD "
+                                f"({(-_slip)*10:.0f} pips LEBIH BAIK dari anchor) — "
+                                f"tidak menambah risiko.")
+                # [PARITAS SL — 10 Sep 2026, pelajaran log tiket 5075405797]
+                # Engine riset menjangkar SL ke harga FILL (fill ∓ SL). Live
+                # mengirim SL dijangkar ke anchor sinyal; bila fill menyimpang
+                # > $0.50 (mis. eksekusi telat karena koneksi putus), geometri
+                # efektif bergeser (SL 123 pips, bukan 150). Re-anchor ke fill
+                # mengembalikan geometri PERSIS engine.
+                if abs(_slip) > 0.50:
+                    _sl_dist = config.STOP_LOSS_PIPS * 0.10
+                    _new_sl = (_fp - _sl_dist) if sig.type == "BUY" else (_fp + _sl_dist)
+                    if bridge.modify_sl(ticket, _new_sl):
+                        logger.info(f"🔧 SL re-anchor ke fill: {_new_sl:.2f} "
+                                    f"(fill {(_fp):.2f} menyimpang {abs(_slip):.2f} "
+                                    f"dari anchor — SL kembali persis "
+                                    f"{config.STOP_LOSS_PIPS:.0f} pips dari harga isi)")
+                        journal.log("sl_reanchor", ticket=ticket,
+                                    fill_price=round(_fp, 4),
+                                    new_sl=round(_new_sl, 4),
+                                    old_sl=round(sig.stop_loss, 4),
+                                    deviation_usd=round(abs(_slip), 4))
             journal.log("order_open", ticket=ticket, type=sig.type,
                         lot=sig.lot_size, entry=round(sig.entry_price, 4),
                         fill_price=round(_fp, 4) if _fp else None,
@@ -830,13 +858,33 @@ def main():
                                 latest_time = df5.index[-1]
                                 if latest_time != last_scanned_bar_time:
                                     last_scanned_bar_time = latest_time
-                                    balance = bridge.get_account_balance()
-                                    spread_now = bridge.get_current_tick()
-                                    spread_usd_now = spread_now.get("spread", 0.0) * price_point
-                                    sig = strategy.evaluate(df5, df15, dfh1, balance,
-                                                            spread_usd=spread_usd_now)
-                                    if sig is not None:
-                                        _emit_and_send(sig, balance, spread_usd_now)
+                                    # [GUARD USIA BAR — 10 Sep 2026, pelajaran
+                                    # tiket 5075405797] Backtest mengasumsikan
+                                    # entry ≈ OPEN bar setelah sinyal. Bila
+                                    # koneksi putus, bar tertutup terlanjur basi
+                                    # saat daemon akhirnya melihatnya (order
+                                    # terkirim menit-menit kemudian di tengah
+                                    # bar -> fill tak termodelkan). Bar yang
+                                    # tutupnya lebih tua dari batas ini
+                                    # DILEWATI demi paritas asumsi engine.
+                                    _max_age = int(getattr(config, "G4_MAX_SIGNAL_AGE_SECONDS", 120))
+                                    _bar_age = (datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+                                                - (latest_time + pd.Timedelta(minutes=5))).total_seconds()
+                                    if _bar_age > _max_age:
+                                        logger.warning(f"⏭️ [G4] Bar sinyal BASI dilewati: bar {latest_time} "
+                                                       f"tutup {int(_bar_age)} dtk lalu (batas {_max_age}s) — "
+                                                       f"kemungkinan koneksi putus/lambat; entry di tengah bar "
+                                                       f"tidak sesuai asumsi engine.")
+                                        journal.log("signal_skipped_stale", bar=str(latest_time),
+                                                    age_seconds=int(_bar_age), limit=_max_age)
+                                    else:
+                                        balance = bridge.get_account_balance()
+                                        spread_now = bridge.get_current_tick()
+                                        spread_usd_now = spread_now.get("spread", 0.0) * price_point
+                                        sig = strategy.evaluate(df5, df15, dfh1, balance,
+                                                                spread_usd=spread_usd_now)
+                                        if sig is not None:
+                                            _emit_and_send(sig, balance, spread_usd_now)
                             else:
                                 logger.warning("⚠️ [G4] Riwayat M5/M15/H1 belum cukup "
                                                "(butuh >=350 M5 / 20 M15 / 260 H1) — "
