@@ -28,6 +28,7 @@ SUITES = [
     ("Verif: persistensi state",    "verify_state_persistence.py",  "0 FAIL"),
     ("Verif: fix 10016",            "verify_fix_10016.py",          "0 FAIL"),
     ("Verif: dashboard v2",         "verify_dashboard_v2.py",       "0 FAIL"),
+    ("Verif: dashboard v3 (D6)",    "verify_dashboard_v3.py",       "0 FAIL"),
     ("Verif: parity engine",        "verify_engine_parity.py",      None),
     ("POC : kegagalan koneksi",     "audit_faults/poc_faults.py",   "0 FAIL"),
 ]

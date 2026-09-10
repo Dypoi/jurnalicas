@@ -49,6 +49,24 @@ def main():
     fine['time'] = pd.to_datetime(fine['time'])
     fine = fine.sort_values('time').reset_index(drop=True)
 
+    # [AUDIT FORENSIK 3 — laporan strategi 08 Sep 2026] GUARD KONSISTENSI FEED.
+    # Jebakan yang sudah menelan orang: --m5 default adalah M5 repo (feed lain,
+    # 2-digit) sedangkan --fine M1 broker (3-digit). Dua akibat senyap:
+    #   (1) price_point di-infer dari M5 (0.01) -> biaya spread 10x lebih mahal;
+    #   (2) sinyal dibangun dari feed yang berbeda dari data eksekusi.
+    # Hasilnya PF 0.52 yang tampak sah padahal sampah metodologi.
+    from src.backtest.engine import infer_price_point
+    pt_m5 = infer_price_point(df['close'].values)
+    pt_fine = infer_price_point(fine['close'].values)
+    if abs(pt_m5 - pt_fine) > 1e-12:
+        print(f"⚠️  [PERINGATAN KERAS] price point M5 ({pt_m5}) ≠ price point fine ({pt_fine})!")
+        print("    Biaya spread akan dihitung dengan satuan yang SALAH (bias hingga 10x).")
+        print("    Gunakan M5 yang di-resample dari file fine yang SAMA")
+        print("    (contoh benar: --m5 data/historical/xauusd_m5_from_m1.csv).")
+    if df['time'].max() < fine['time'].min() or fine['time'].max() < df['time'].min():
+        print("⚠️  [PERINGATAN KERAS] rentang waktu M5 dan fine TIDAK bertumpangan —")
+        print("    sinyal dan eksekusi berasal dari dua feed/periode berbeda. Hasil TIDAK VALID.")
+
     tf_fine = fine['time'].diff().median()
     tf_m5 = df['time'].diff().median()
     print(f"[*] TF sinyal: {tf_m5} | TF eksekusi: {tf_fine}")

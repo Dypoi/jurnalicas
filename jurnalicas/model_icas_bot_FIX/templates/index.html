@@ -97,6 +97,8 @@
                 <h1>⚡ MODEL ICAS AUTONOMOUS BOT</h1>
                 <span class="badge badge-gold">XAUUSD M5</span>
                 <span class="badge badge-blue" id="engine-ver">ENGINE: ...</span>
+                <!-- [D6-11] strategi aktif (G4/ICAS) dirender dari /api/status -->
+                <span class="badge badge-purple" id="strategy-badge">STRATEGY: ...</span>
                 <span class="badge badge-red" id="engine-state-badge">STATUS: ...</span>
             </div>
             <div style="display: flex; gap: 10px; align-items: center; font-size: 12px;">
@@ -104,6 +106,8 @@
                 <div>Server: <strong id="server-time" style="color: var(--text-sub);">--:--:--</strong></div>
                 <span id="session-badge" class="badge badge-blue">Session Active</span>
                 <span id="kz-badge" class="badge badge-gold">24H Full Market</span>
+                <!-- [D6-03/D6-11] spread live dalam USD + status vs guard entry bot -->
+                <span id="spread-badge" class="badge badge-live">SPREAD: --</span>
             </div>
         </div>
 
@@ -117,9 +121,9 @@
                         <span id="acc-mode-badge" class="badge badge-live" style="margin-left: 6px;">DEMO</span>
                     </div>
                     <div class="acc-meta">
-                        Login: <strong id="acc-login-val" style="color: var(--text-main);">88921045</strong> | 
-                        Server: <strong id="acc-server-val">Exness-MT5Trial6</strong> | 
-                        Leverage: <strong id="acc-leverage-val">1:2000</strong>
+                        Login: <strong id="acc-login-val" style="color: var(--text-main);">…</strong> | 
+                        Server: <strong id="acc-server-val">…</strong> | 
+                        Leverage: <strong id="acc-leverage-val">…</strong>
                     </div>
                 </div>
             </div>
@@ -182,6 +186,7 @@
                 <span class="pos-stat-label">Running Profit</span>
                 <span class="pos-stat-val val-green" id="pos-running-pnl">+0.0 pips (+$0.00)</span>
             </div>
+            <div style="width: 100%; font-size: 10.5px; color: var(--text-sub);" id="pos-reason"></div>
             <div style="display: flex; gap: 6px;" id="pos-milestones">
                 <span id="badge-be" class="badge badge-gold">BE+ PENDING</span>
                 <span id="badge-tp1" class="badge badge-blue">TP1 (1:1) PENDING</span>
@@ -195,14 +200,42 @@
             <div class="chart-box">
                 <div class="chart-header">
                     <div class="chart-title">📊 XAUUSD M5 Price Action & 4-Tier Target Tracker</div>
-                    <div style="font-size: 11px; color: var(--text-sub);" id="chart-info">
-                        🟡 Garis Kuning = Live Bid Price | 🟢 FVG Bull | 🔴 FVG Bear
+                    <div style="font-size: 11px; color: var(--text-sub); display: flex; gap: 10px; align-items: center;" id="chart-info">
+                        <span class="badge badge-live" id="chart-live-badge">● LIVE</span>
+                        <span>⏱ Bar M5 tutup: <strong id="chart-m5-countdown" style="color: var(--gold);">--:--</strong></span>
+                        <span>🟡 Garis Kuning = Live Bid | 🟢 FVG Bull | 🔴 FVG Bear | 🥇 PDH/PDL</span>
                     </div>
                 </div>
                 <canvas id="candleChart"></canvas>
             </div>
 
             <div class="side-panel">
+                <!-- [D6-11] Kaskade G4 — hanya tampil saat STRATEGY == G4 -->
+                <div class="panel-box" id="g4-panel" style="display: none;">
+                    <div class="panel-title">🧭 Kaskade Sinyal G4 (MTF)</div>
+                    <div class="info-row"><span class="info-label">L1 · Bias H1</span><span class="info-val" id="g4-l1">EMA200 close H1</span></div>
+                    <div class="info-row"><span class="info-label">L2 · Likuiditas 24 jam</span><span class="info-val val-gold" id="g4-l2">…</span></div>
+                    <div class="info-row"><span class="info-label">L3 · Struktur</span><span class="info-val">CHoCH swing 5-bar M15</span></div>
+                    <div class="info-row"><span class="info-label">L4 · Trigger</span><span class="info-val" id="g4-l4">…</span></div>
+                    <div class="info-row"><span class="info-label">Guard Spread Entry</span><span class="info-val val-green" id="g4-guard">…</span></div>
+                </div>
+
+                <!-- [D6-12] Kenapa (Belum) Entry — bloker + checklist kaskade live -->
+                <div class="panel-box" id="why-panel" style="display: none;">
+                    <div class="panel-title">🎯 Kenapa (Belum) Entry</div>
+                    <div id="why-status" style="font-size: 11.5px; line-height: 1.5; margin-bottom: 8px; padding: 7px 9px; border-radius: 6px; background: var(--bg-panel);">Memuat diagnostik…</div>
+                    <table id="why-table" style="font-size: 11px;">
+                        <thead><tr>
+                            <th>Lapis</th><th>Jalur BUY</th><th>Jalur SELL</th>
+                        </tr></thead>
+                        <tbody id="why-table-body">
+                            <tr><td colspan="3" style="text-align:center; color: var(--text-sub);">—</td></tr>
+                        </tbody>
+                    </table>
+                    <div class="info-row"><span class="info-label">Bar M5 tutup dalam</span><span class="info-val val-gold" id="m5-countdown">--:--</span></div>
+                    <div class="info-row"><span class="info-label">Sinyal terakhir</span><span class="info-val" id="last-signal">—</span></div>
+                </div>
+
                 <!-- Protocol Rules (D-02: semua nilai DINAMIS dari engine aktif — tak ada hardcode legacy) -->
                 <div class="panel-box">
                     <div class="panel-title">🛡️ 4-Tier Target Protocols <span id="cfg-engine" style="font-size: 10px; color: var(--text-sub);"></span></div>
@@ -273,6 +306,11 @@
         function apiUrl(path) {
             return AUTH_TOKEN ? path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(AUTH_TOKEN) : path;
         }
+        // [D6-10] Escape HTML utk semua nilai jurnal/broker yang dirender via
+        // innerHTML (hardening XSS — sumber data teks dari file jurnal).
+        function esc(s) {
+            return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
         // [D-02] Parameter engine aktif (diisi fetchStatus) — semua label di UI
         // dirender dari sini, BUKAN hardcode. Default = engine v2 SWING-150.
         let CFG = { sl: 150, be: 9999, be_active: false, tp1: 187.5, tp2: 375, tp3: 562.5,
@@ -285,7 +323,7 @@
                 beEl.innerText = '+' + CFG.be.toFixed(1) + ' pips (' + usd(CFG.be) + ') → Lock BE+';
                 beEl.className = 'info-val val-green';
             } else {
-                beEl.innerText = 'DIMATIKAN (engine v2 — exit via TP tier + trailing)';
+                beEl.innerText = 'DIMATIKAN (exit via TP tier + trailing 50/30 — LAPORAN_STRATEGI_G4.md §6a)';
                 beEl.className = 'info-val val-red';
             }
             document.getElementById('cfg-tp1-label').innerText = 'TP1 (' + CFG.r1 + 'xSL / 30% Lot)';
@@ -341,6 +379,30 @@
                     document.getElementById('engine-ver').innerText = d.engine_version.split(' (')[0].toUpperCase();
                     document.getElementById('cfg-engine').innerText = '(' + d.engine_version.split(' (')[0] + ')';
                 }
+                // [D6-11] Badge strategi aktif + panel kaskade G4 + guard spread
+                const stratBadge = document.getElementById('strategy-badge');
+                if (d.strategy) {
+                    stratBadge.innerText = 'STRATEGY: ' + d.strategy;
+                    stratBadge.className = 'badge ' + (d.strategy === 'G4' ? 'badge-purple' : 'badge-blue');
+                }
+                if (d.strategy === 'G4' && d.g4) {
+                    const gp = document.getElementById('g4-panel');
+                    gp.style.display = 'block';
+                    document.getElementById('g4-l1').innerText = 'EMA' + d.g4.h1_ema_span + ' close H1 (min ' + d.g4.min_h1_bars + ' bar)';
+                    document.getElementById('g4-l2').innerText = 'Sweep PDH/PDL @ ' + d.g4.sweep_bars + ' bar M5';
+                    document.getElementById('g4-l4').innerText = 'Displacement + FVG $' + d.g4.fvg_buffer_usd.toFixed(2);
+                    document.getElementById('g4-guard').innerText = d.max_spread_usd > 0 ? ('Maks $' + d.max_spread_usd.toFixed(2) + ' (USD)') : '—';
+                } else {
+                    document.getElementById('g4-panel').style.display = 'none';
+                }
+                // [D6-03] Badge spread live (USD) + status vs guard entry bot
+                const spBadge = document.getElementById('spread-badge');
+                if (typeof d.spread_usd === 'number') {
+                    spBadge.innerText = 'SPREAD: $' + d.spread_usd.toFixed(2);
+                    const spHigh = typeof d.spread_status === 'string' && d.spread_status.startsWith('TINGGI');
+                    spBadge.className = 'badge ' + (spHigh ? 'badge-red' : 'badge-live');
+                    spBadge.title = d.spread_status || '';
+                }
                 CFG = { sl: d.sl_pips, be: d.early_be_pips, be_active: d.be_active,
                         tp1: d.tp1_pips, tp2: d.tp2_pips, tp3: d.tp3_pips,
                         r1: d.tp1_ratio, r2: d.tp2_ratio, r3: d.tp3_ratio,
@@ -380,15 +442,28 @@
                     posBanner.style.display = 'flex';
                     const p = d.active_position;
                     const typeBadge = document.getElementById('pos-type-badge');
-                    typeBadge.innerText = p.type + ' ' + p.volume.toFixed(2) + ' Lots';
+                    typeBadge.innerText = p.type + ' ' + Number(p.volume).toFixed(2) + ' Lots';
                     typeBadge.className = 'badge ' + (p.type === 'BUY' ? 'badge-live' : 'badge-red');
                     document.getElementById('pos-ticket').innerText = '#' + p.ticket;
-                    document.getElementById('pos-entry').innerText = p.entry.toFixed(2);
-                    document.getElementById('pos-sl').innerText = p.sl.toFixed(2);
-                    
+                    document.getElementById('pos-entry').innerText = Number(p.entry).toFixed(2);
+                    document.getElementById('pos-sl').innerText = Number(p.sl).toFixed(2);
+                    POSL = computePosLines(p);            // [D6-12] garis entry/SL/TP di chart
+                    renderChart();
+                    const prEl = document.getElementById('pos-reason');
+                    if (LASTSIG && LASTSIG.reason) {
+                        prEl.innerText = '📝 Alasan entry: ' + LASTSIG.reason;
+                    } else { prEl.innerText = ''; }
+
+                    // [D6-08] Feed mati -> fav/pnl null: tampil "—" + alasan,
+                    // BUKAN pnl ratusan ribu dolar dari harga 0.
                     const pnlEl = document.getElementById('pos-running-pnl');
-                    pnlEl.innerText = (p.fav_pips >= 0 ? '+' : '') + p.fav_pips.toFixed(1) + ' pips ($' + (p.pnl_usd >= 0 ? '+' : '') + p.pnl_usd.toFixed(2) + ')';
-                    pnlEl.className = 'pos-stat-val ' + (p.pnl_usd >= 0 ? 'val-green' : 'val-red');
+                    if (p.fav_pips === null || p.fav_pips === undefined) {
+                        pnlEl.innerText = p.feed_reason ? ('FEED MATI (' + p.feed_reason + ') — harga tidak valid') : '—';
+                        pnlEl.className = 'pos-stat-val val-red';
+                    } else {
+                        pnlEl.innerText = (p.fav_pips >= 0 ? '+' : '') + p.fav_pips.toFixed(1) + ' pips ($' + (p.pnl_usd >= 0 ? '+' : '') + p.pnl_usd.toFixed(2) + ')';
+                        pnlEl.className = 'pos-stat-val ' + (p.pnl_usd >= 0 ? 'val-green' : 'val-red');
+                    }
 
                     // [D-02] Label milestone dinamis mengikuti CFG engine aktif
                     document.getElementById('badge-be').className = 'badge ' + (p.be_set ? 'badge-live' : 'badge-gold');
@@ -405,6 +480,7 @@
                     document.getElementById('badge-tp3').innerText = p.tp3_hit ? ('TP3 HIT 🚀 (' + CFG.r3 + 'xSL, SL->TP1)') : 'TP3 PENDING';
                 } else {
                     posBanner.style.display = 'none';
+                    POSL = null;                          // [D6-12] garis posisi dihapus
                 }
             } catch (e) {
                 console.error("fetchStatus err:", e);
@@ -418,10 +494,18 @@
                 if (data.stats && data.stats.win_rate) {
                     const st = data.stats;
                     document.getElementById('win-rate-stat').innerText = st.win_rate + '% (' + st.wins + ' W)';
-                    const beRate = ((st.be_activations / st.total_trades) * 100).toFixed(2);
-                    document.getElementById('be-rate-stat').innerText = beRate + '% (' + st.be_activations + ' BE)';
-                    const nonLoss = (((st.wins + st.be_activations) / st.total_trades) * 100).toFixed(2);
-                    document.getElementById('non-loss-stat').innerHTML = nonLoss + '% <span style="font-size: 11px; color: var(--text-sub);">(PF: ' + st.profit_factor + ')</span>';
+                    // [D6-04] Rasio dihitung SERVER (be_rate / non_loss_rate) —
+                    // JS lama memakai be_activations (FLAG per-trade, bukan
+                    // klasifikasi hasil) sehingga Non-Loss Rate bisa salah
+                    // (WIN yang juga be_set terhitung dua kali, rasio >100%).
+                    const beRate = (typeof st.be_rate === 'number')
+                        ? st.be_rate
+                        : (st.total_trades ? ((st.be_activations / st.total_trades) * 100) : 0);
+                    document.getElementById('be-rate-stat').innerText = beRate.toFixed(2) + '% (' + (st.be_trades ?? st.be_activations) + ' BE)';
+                    const nonLoss = (typeof st.non_loss_rate === 'number')
+                        ? st.non_loss_rate
+                        : (st.total_trades ? (((st.wins + (st.be_trades ?? st.be_activations)) / st.total_trades) * 100) : 0);
+                    document.getElementById('non-loss-stat').innerHTML = nonLoss.toFixed(2) + '% <span style="font-size: 11px; color: var(--text-sub);">(PF: ' + st.profit_factor + ')</span>';
                 }
                 // [D-03] Label SUMBER statistik secara eksplisit + peringatan dataset repo
                 if (data.stats && data.stats.source) {
@@ -448,11 +532,11 @@
 
                         // [D-02] Label sel milestone dinamis (bukan 1:1/+20p dsb. legacy)
                         tr.innerHTML = `
-                            <td><strong>${t.time}</strong></td>
-                            <td><span class="badge ${t.type === 'BUY' ? 'badge-live' : 'badge-red'}">${t.type}</span></td>
+                            <td><strong>${esc(t.time)}</strong></td>
+                            <td><span class="badge ${t.type === 'BUY' ? 'badge-live' : 'badge-red'}">${esc(t.type)}</span></td>
                             <td><span class="${tagClass}">${resText}</span></td>
-                            <td class="${t.pnl >= 0 ? 'val-green' : 'val-red'}"><strong>$${t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(2)}</strong></td>
-                            <td>+${t.max_fav.toFixed(1)} pips</td>
+                            <td class="${t.pnl >= 0 ? 'val-green' : 'val-red'}"><strong>$${t.pnl >= 0 ? '+' : ''}${Number(t.pnl).toFixed(2)}</strong></td>
+                            <td>+${Number(t.max_fav).toFixed(1)} pips</td>
                             <td>${t.be_set ? '🛡️ Lock' : '-'}</td>
                             <td>${t.tp1 ? ('🎯 ' + CFG.r1 + 'x (+' + CFG.tp1.toFixed(0) + 'p)') : '-'}</td>
                             <td>${t.tp2 ? ('🎯 ' + CFG.r2 + 'x (+' + CFG.tp2.toFixed(0) + 'p)') : '-'}</td>
@@ -468,96 +552,230 @@
             }
         }
 
-        async function drawChart() {
+        // [D6-12] CHART REALTIME — candle di-cache; tick 1 dtk meng-update
+        // candle berjalan + garis harga LIVE; garis PDH/PDL & posisi (entry/SL/TP)
+        // digambar sebagai level; countdown ke close bar M5.
+        let CANDLES = [];
+        let G4L = { pdh: null, pdl: null };
+        let POSL = null;
+        let LASTTICK = null;
+        let LASTSIG = null;
+
+        function computePosLines(p) {
+            if (!p) return null;
+            const d = 0.10;
+            const s = p.type === 'BUY' ? 1 : -1;
+            return { type: p.type, entry: p.entry, sl: p.sl,
+                     tp1: p.entry + s * CFG.tp1 * d,
+                     tp2: p.entry + s * CFG.tp2 * d,
+                     tp3: p.entry + s * CFG.tp3 * d };
+        }
+
+        function fmtCountdown(s) {
+            if (s === null || s === undefined || isNaN(s)) return '--:--';
+            const m = Math.floor(s / 60), ss = Math.floor(s % 60);
+            return m + ':' + String(ss).padStart(2, '0');
+        }
+
+        function drawHLine(ctx, w, y, color, label, dash) {
+            ctx.strokeStyle = color; ctx.setLineDash(dash || []);
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+            ctx.setLineDash([]);
+            if (label) {
+                ctx.font = 'bold 10px sans-serif';
+                const tw = ctx.measureText(label).width + 10;
+                ctx.fillStyle = color; ctx.fillRect(4, y - 8, tw, 16);
+                ctx.fillStyle = '#000000'; ctx.fillText(label, 9, y + 4);
+            }
+        }
+
+        async function fetchCandles() {
+            try {
+                const res = await fetch(apiUrl('/api/candles'));
+                const d = await res.json();
+                if (d && d.length) { CANDLES = d; renderChart(); }
+            } catch (e) { console.error('fetchCandles err:', e); }
+        }
+
+        async function fetchTick() {
+            try {
+                const res = await fetch(apiUrl('/api/tick'));
+                LASTTICK = await res.json();
+                const badge = document.getElementById('chart-live-badge');
+                if (LASTTICK.valid) {
+                    badge.innerText = '● LIVE'; badge.className = 'badge badge-live';
+                    if (CANDLES.length) {
+                        const lc = CANDLES[CANDLES.length - 1];
+                        lc.close = Math.round(LASTTICK.bid * 100) / 100;
+                        lc.high = Math.max(lc.high, lc.close);
+                        lc.low = Math.min(lc.low, lc.close);
+                    }
+                } else {
+                    badge.innerText = '○ FEED MATI (' + (LASTTICK.reason || '?') + ')';
+                    badge.className = 'badge badge-red';
+                }
+                // countdown ke close bar M5 (dari jam server broker)
+                let cdown = null;
+                if (LASTTICK.server_time) {
+                    const parts = LASTTICK.server_time.split(':');
+                    if (parts.length === 3) {
+                        const secs = (+parts[1]) * 60 + (+parts[2]);
+                        cdown = 300 - (secs % 300);
+                    }
+                }
+                const cdTxt = fmtCountdown(cdown);
+                document.getElementById('chart-m5-countdown').innerText = cdTxt;
+                document.getElementById('m5-countdown').innerText = cdTxt;
+                renderChart();
+            } catch (e) { /* polling berikutnya */ }
+        }
+
+        async function fetchG4State() {
+            try {
+                const res = await fetch(apiUrl('/api/g4_state'));
+                const d = await res.json();
+                LASTSIG = d.last_signal || null;
+                const panel = document.getElementById('why-panel');
+                if ((d.strategy || 'ICAS') !== 'G4') { panel.style.display = 'none'; return; }
+                panel.style.display = 'block';
+                G4L = { pdh: d.pdh, pdl: d.pdl };
+                renderChart();
+
+                const st = document.getElementById('why-status');
+                if (!d.available) {
+                    st.innerHTML = '⚠️ ' + esc((d.blockers[0] || {}).text || 'Data kaskade belum tersedia');
+                    st.style.borderLeft = '3px solid var(--red)';
+                } else if (d.blockers.length) {
+                    const b = d.blockers[0];
+                    st.innerHTML = (b.code === 'ready' ? '✅ ' : '⛔ ') + esc(b.text);
+                    st.style.borderLeft = '3px solid ' + (b.code === 'ready' ? 'var(--green)' : 'var(--red)');
+                } else {
+                    st.innerHTML = '✅ Tidak ada bloker — menunggu bar M5 tutup.';
+                    st.style.borderLeft = '3px solid var(--green)';
+                }
+
+                const tb = document.getElementById('why-table-body');
+                if (d.detail && d.detail.layers) {
+                    tb.innerHTML = d.detail.layers.map(l => `
+                        <tr>
+                            <td style="color: var(--text-sub);">${esc(l.name)}</td>
+                            <td class="${l.buy_ok ? 'val-green' : 'val-red'}">${l.buy_ok ? '✅' : '❌'} <span style="font-size:10px;">${esc(l.buy_text)}</span></td>
+                            <td class="${l.sell_ok ? 'val-green' : 'val-red'}">${l.sell_ok ? '✅' : '❌'} <span style="font-size:10px;">${esc(l.sell_text)}</span></td>
+                        </tr>`).join('') +
+                        (d.detail.signal
+                            ? `<tr><td colspan="3" style="text-align:center;"><span class="badge ${d.detail.signal === 'BUY' ? 'badge-live' : 'badge-red'}">SINYAL AKTIF BAR INI: ${d.detail.signal}</span></td></tr>`
+                            : '');
+                }
+
+                const ls = document.getElementById('last-signal');
+                if (d.last_signal) {
+                    ls.innerHTML = '<span class="' + (d.last_signal.type === 'BUY' ? 'val-green' : 'val-red') + '">' + esc(d.last_signal.type) + '</span> @ ' + esc((d.last_signal.ts || '').slice(5, 16).replace('T', ' '));
+                    ls.title = d.last_signal.reason || '';
+                } else { ls.innerText = '—'; ls.title = ''; }
+            } catch (e) { console.error('fetchG4State err:', e); }
+        }
+
+        function renderChart() {
             const canvas = document.getElementById('candleChart');
             const ctx = canvas.getContext('2d');
             canvas.width = canvas.parentElement.clientWidth - 28;
             canvas.height = 380;
+            if (!CANDLES.length) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            try {
-                const res = await fetch(apiUrl('/api/candles'));
-                const candles = await res.json();
-                if (!candles || candles.length === 0) return;
+            let minP = Infinity, maxP = -Infinity;
+            const extra = [];
+            if (G4L.pdh) extra.push(G4L.pdh);
+            if (G4L.pdl) extra.push(G4L.pdl);
+            if (POSL) extra.push(POSL.entry, POSL.sl, POSL.tp1, POSL.tp2, POSL.tp3);
+            CANDLES.forEach(c => {
+                if (c.low < minP) minP = c.low;
+                if (c.high > maxP) maxP = c.high;
+            });
+            extra.forEach(v => {
+                if (v && v > 0) { if (v < minP) minP = v; if (v > maxP) maxP = v; }
+            });
+            const pad = (maxP - minP) * 0.08 || 1.0;
+            minP -= pad; maxP += pad;
 
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const n = CANDLES.length;
+            const candleWidth = Math.max(3.5, (canvas.width / n) * 0.65);
+            const step = canvas.width / n;
+            const yOf = p => canvas.height - ((p - minP) / (maxP - minP)) * canvas.height;
 
-                let minP = Infinity, maxP = -Infinity;
-                candles.forEach(c => {
-                    if (c.low < minP) minP = c.low;
-                    if (c.high > maxP) maxP = c.high;
-                });
-                const pad = (maxP - minP) * 0.08 || 1.0;
-                minP -= pad; maxP += pad;
+            // Asian Range Band
+            CANDLES.forEach((c, idx) => {
+                const x = idx * step + step / 2;
+                if (c.asian_high && c.asian_low && c.asian_high > c.asian_low) {
+                    const yAH = yOf(c.asian_high);
+                    const yAL = yOf(c.asian_low);
+                    ctx.fillStyle = 'rgba(245, 179, 36, 0.03)';
+                    ctx.fillRect(x - step/2, yAH, step, yAL - yAH);
+                }
+            });
 
-                const n = candles.length;
-                const candleWidth = Math.max(3.5, (canvas.width / n) * 0.65);
-                const step = canvas.width / n;
-
-                // Asian Range Band
-                candles.forEach((c, idx) => {
-                    const x = idx * step + step / 2;
-                    if (c.asian_high && c.asian_low && c.asian_high > c.asian_low) {
-                        const yAH = canvas.height - ((c.asian_high - minP) / (maxP - minP)) * canvas.height;
-                        const yAL = canvas.height - ((c.asian_low - minP) / (maxP - minP)) * canvas.height;
-                        ctx.fillStyle = 'rgba(245, 179, 36, 0.03)';
-                        ctx.fillRect(x - step/2, yAH, step, yAL - yAH);
-                    }
-                });
-
-                // Candlesticks
-                candles.forEach((c, idx) => {
-                    const x = idx * step + step / 2;
-                    const yOpen = canvas.height - ((c.open - minP) / (maxP - minP)) * canvas.height;
-                    const yClose = canvas.height - ((c.close - minP) / (maxP - minP)) * canvas.height;
-                    const yHigh = canvas.height - ((c.high - minP) / (maxP - minP)) * canvas.height;
-                    const yLow = canvas.height - ((c.low - minP) / (maxP - minP)) * canvas.height;
-
-                    const isGreen = c.close >= c.open;
-                    ctx.strokeStyle = isGreen ? '#10d88b' : '#f75268';
-                    ctx.fillStyle = isGreen ? '#10d88b' : '#f75268';
-
-                    if (c.bull_fvg) {
-                        ctx.fillStyle = 'rgba(16, 216, 139, 0.15)';
-                        ctx.fillRect(x - step/2, yHigh - 5, step, 10);
-                        ctx.fillStyle = '#10d88b';
-                    } else if (c.bear_fvg) {
-                        ctx.fillStyle = 'rgba(247, 82, 104, 0.15)';
-                        ctx.fillRect(x - step/2, yLow - 5, step, 10);
-                        ctx.fillStyle = '#f75268';
-                    }
-
-                    ctx.beginPath();
-                    ctx.lineWidth = 1.2;
-                    ctx.moveTo(x, yHigh);
-                    ctx.lineTo(x, yLow);
-                    ctx.stroke();
-
-                    const top = Math.min(yOpen, yClose);
-                    const h = Math.max(2, Math.abs(yClose - yOpen));
-                    ctx.fillRect(x - candleWidth / 2, top, candleWidth, h);
-                });
-
-                // Latest Price Tag
-                const latest = candles[candles.length - 1];
-                const yLatest = canvas.height - ((latest.close - minP) / (maxP - minP)) * canvas.height;
-                ctx.strokeStyle = '#f5b324';
-                ctx.setLineDash([4, 4]);
-                ctx.beginPath();
-                ctx.moveTo(0, yLatest);
-                ctx.lineTo(canvas.width, yLatest);
-                ctx.stroke();
-                ctx.setLineDash([]);
-
-                const labelText = 'BID: ' + latest.close.toFixed(2);
-                ctx.fillStyle = '#f5b324';
-                ctx.fillRect(canvas.width - 85, yLatest - 11, 85, 22);
-                ctx.fillStyle = '#000000';
-                ctx.font = 'bold 11px sans-serif';
-                ctx.fillText(labelText, canvas.width - 78, yLatest + 4);
-
-            } catch (e) {
-                console.error("drawChart err:", e);
+            // [D6-12] Level G4: PDH/PDL (target likuiditas) + posisi aktif
+            if (G4L.pdh) drawHLine(ctx, canvas.width, yOf(G4L.pdh), '#f5b324', 'PDH ' + G4L.pdh.toFixed(2), [6, 4]);
+            if (G4L.pdl) drawHLine(ctx, canvas.width, yOf(G4L.pdl), '#f5b324', 'PDL ' + G4L.pdl.toFixed(2), [6, 4]);
+            if (POSL) {
+                drawHLine(ctx, canvas.width, yOf(POSL.entry), '#ffffff', 'ENTRY ' + POSL.entry.toFixed(2), [2, 3]);
+                drawHLine(ctx, canvas.width, yOf(POSL.sl), '#f75268', 'SL ' + POSL.sl.toFixed(2), []);
+                drawHLine(ctx, canvas.width, yOf(POSL.tp1), '#10d88b', 'TP1 ' + POSL.tp1.toFixed(2), [4, 3]);
+                drawHLine(ctx, canvas.width, yOf(POSL.tp2), '#10d88b', 'TP2 ' + POSL.tp2.toFixed(2), [4, 3]);
+                drawHLine(ctx, canvas.width, yOf(POSL.tp3), '#10d88b', 'TP3 ' + POSL.tp3.toFixed(2), [4, 3]);
             }
+
+            // Candlesticks
+            CANDLES.forEach((c, idx) => {
+                const x = idx * step + step / 2;
+                const yOpen = yOf(c.open);
+                const yClose = yOf(c.close);
+                const yHigh = yOf(c.high);
+                const yLow = yOf(c.low);
+
+                const isGreen = c.close >= c.open;
+                ctx.strokeStyle = isGreen ? '#10d88b' : '#f75268';
+                ctx.fillStyle = isGreen ? '#10d88b' : '#f75268';
+
+                if (c.bull_fvg) {
+                    ctx.fillStyle = 'rgba(16, 216, 139, 0.15)';
+                    ctx.fillRect(x - step/2, yHigh - 5, step, 10);
+                    ctx.fillStyle = '#10d88b';
+                } else if (c.bear_fvg) {
+                    ctx.fillStyle = 'rgba(247, 82, 104, 0.15)';
+                    ctx.fillRect(x - step/2, yLow - 5, step, 10);
+                    ctx.fillStyle = '#f75268';
+                }
+
+                ctx.beginPath();
+                ctx.lineWidth = 1.2;
+                ctx.moveTo(x, yHigh);
+                ctx.lineTo(x, yLow);
+                ctx.stroke();
+
+                const top = Math.min(yOpen, yClose);
+                const h = Math.max(2, Math.abs(yClose - yOpen));
+                ctx.fillRect(x - candleWidth / 2, top, candleWidth, h);
+            });
+
+            // Live price line — tick 1 dtk (fallback: close candle terakhir)
+            const latest = CANDLES[n - 1];
+            const livePx = (LASTTICK && LASTTICK.valid) ? LASTTICK.bid : latest.close;
+            const yLatest = yOf(livePx);
+            ctx.strokeStyle = '#f5b324';
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(0, yLatest);
+            ctx.lineTo(canvas.width, yLatest);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            const labelText = 'BID: ' + livePx.toFixed(2);
+            ctx.fillStyle = '#f5b324';
+            ctx.fillRect(canvas.width - 85, yLatest - 11, 85, 22);
+            ctx.fillStyle = '#000000';
+            ctx.font = 'bold 11px sans-serif';
+            ctx.fillText(labelText, canvas.width - 78, yLatest + 4);
         }
 
         // [D-05] Mini feed event jurnal di panel observasi
@@ -574,21 +792,25 @@
                 box.innerHTML = evs.map(e => {
                     const ic = icons[e.event] || '•';
                     const extra = e.event === 'tp_hit' ? (' L' + e.level) :
-                        (e.realized_total !== undefined ? (' $' + (e.realized_total >= 0 ? '+' : '') + e.realized_total.toFixed(2)) :
+                        (e.realized_total !== undefined ? (' $' + (e.realized_total >= 0 ? '+' : '') + Number(e.realized_total).toFixed(2)) :
                         (e.ticket ? (' #' + e.ticket) : ''));
-                    return `<div style="padding: 2px 0; border-bottom: 1px solid rgba(32,43,59,.4);">${(e.ts||'').slice(5,16).replace('T',' ')} ${ic} ${e.event}${extra}</div>`;
+                    return `<div style="padding: 2px 0; border-bottom: 1px solid rgba(32,43,59,.4);">${esc((e.ts||'').slice(5,16).replace('T',' '))} ${ic} ${esc(e.event)}${extra}</div>`;
                 }).join('');
             } catch (e) { console.error('fetchJournal err:', e); }
         }
 
         fetchStatus();
         fetchStatsAndTrades();
-        drawChart();
+        fetchCandles();
+        fetchG4State();
         fetchJournal();
+        fetchTick();
         setInterval(fetchStatus, 2000);
         setInterval(fetchStatsAndTrades, 5000);
-        setInterval(drawChart, 8000);
         setInterval(fetchJournal, 5000);
+        setInterval(fetchCandles, 10000);
+        setInterval(fetchG4State, 10000);
+        setInterval(fetchTick, 1000);      // [D6-12] chart realtime 1 dtk
     </script>
 </body>
 </html>

@@ -59,6 +59,35 @@ class StratCfg:
     max_consec_losses: int = 999
     max_spread_usd: float = 1.20          # guard, disetel ke feed ini (lihat laporan)
     risk_usd: float = 500.0               # fixed $ risk per trade (5% dari $10k)
+    # ---- [TUNING 08 Sep 2026] mode sinyal & filter tren (default = perilaku lama persis) ----
+    signal_mode: str = "choch"            # "choch" (swing-break/FVG) | "cisd" (Change in State of Delivery)
+                                          # | "mtf" (kaskade H1->M30->M15->M5, eksekusi M1)
+    trend_filter: str | None = None       # None | "sma200d" | "ema200d" | "ema200m5"
+    #  Kolom yang harus ADA di m5 bila dipakai:
+    #    cisd mode  -> "cisd_bull", "cisd_bear"   (level CISD, NaN = tidak ada)
+    #    filter     -> "ma_sma200d" / "ma_ema200d" / "ma_ema200m5"
+    #    mtf mode   -> "h1_ema200", "m30_ssl", "m30_bsl", "pd_low", "pd_high",
+    #                  "m30_fsw", "m30_fsh", "m15_swing_h", "m15_swing_l"
+    #                  (kausal: nilai HTF hanya dari bar HTF yang SUDAH tertutup)
+    #  Ablasi lapisan MTF (default semua aktif):
+    mtf_h1: bool = True                   # lapisan bias H1 (EMA200 H1)
+    mtf_m30: bool = True                  # lapisan likuiditas M30 (sweep BSL/SSL mayor)
+    mtf_m15: bool = True                  # lapisan CHoCH M15
+    mtf_sweep_bars: int = 2               # jendela sweep M30 pada bar M5 (2 = bar i-1..i-2)
+    strict_bar_open_entry: bool = False   # [QC eksekusi-M5] entry hanya bila posisi sudah
+                                          # flat SEBELUM bar eksekusi dibuka (blokir entry
+                                          # di bar yang sama dengan exit posisi lama —
+                                          # tanpa ini, mode bar-M5 bisa entry di open bar
+                                          # setelah mengetahui H/L bar itu = optimis)
+    manage_entry_bar: bool = False        # [QC eksekusi-M5] uji SL/TP juga pada bar
+                                          # eksekusi (entry di open bar; H/L bar itu
+                                          # terjadi setelah open — order SL/TP broker
+                                          # sudah aktif). Default False = perilaku lama
+                                          # (bar entry dikecualikan; di mode M1 hanya
+                                          # 1 menit, dikecilkan artinya).
+    mtf_m30_mode: str = "swing24"         # definisi likuiditas M30: "swing24" (ekstrem 24j
+                                          # rolling) | "pd" (PDH/PDL kemarin) | "fract"
+                                          # (fractal swing 5-bar M30, konfirmasi +2 bar)
 
 
 CFG_CURRENT = StratCfg(name="A - PLAN SAAT INI (config.py)")
@@ -213,7 +242,16 @@ def in_killzone(hour: int, minute: int) -> bool:
 
 
 def signal_at(m5: pd.DataFrame, i: int, cfg: StratCfg) -> str | None:
-    """[A2] Setup ICT pada bar M5 ke-i yang SUDAH TUTUP."""
+    """[A2] Setup ICT pada bar M5 ke-i yang SUDAH TUTUP.
+
+    [TUNING 08 Sep 2026] dua ekstensi opsional (default = perilaku lama persis):
+      signal_mode="cisd"  -> displacement memakai level CISD (Change in State of
+                             Delivery): close menembus open bar pertama dari run
+                             N candle searah sebelumnya (kolom cisd_bull/bear).
+      trend_filter=...    -> BUY hanya bila close > MA, SELL hanya bila close < MA
+                             (kolom ma_sma200d / ma_ema200d / ma_ema200m5 —
+                             MA harian memakai nilai KEMARIN (selesai), kausal).
+    """
     if i < 10:
         return None
     row = m5.iloc[i]
@@ -227,15 +265,105 @@ def signal_at(m5: pd.DataFrame, i: int, cfg: StratCfg) -> str | None:
     c, o = row["close"], row["open"]
     bsl = max(row["asian_high"], row["london_high"])
     ssl = min(row["asian_low"], row["london_low"])
-    bull_fvg = row["low"] > m5["high"].iat[i - 2] + 0.30
-    bear_fvg = row["high"] < m5["low"].iat[i - 2] - 0.30
-    swing_h = m5["high"].iloc[i - 6:i - 1].max()
-    swing_l = m5["low"].iloc[i - 6:i - 1].min()
-    if (m5["low"].iat[i - 1] <= ssl or m5["low"].iat[i - 2] <= ssl) and \
-       ((c > o) and (c > swing_h or bull_fvg)):
+
+    mode = getattr(cfg, "signal_mode", "choch") or "choch"
+    if mode == "cisd":
+        if "cisd_bull" not in m5.columns or "cisd_bear" not in m5.columns:
+            raise ValueError("signal_mode='cisd' membutuhkan kolom cisd_bull/cisd_bear "
+                             "di m5 (lihat research/tuning_trend_filter.py)")
+        lvl_b = row.get("cisd_bull", np.nan)
+        lvl_s = row.get("cisd_bear", np.nan)
+        bull_disp = (c > o) and (not pd.isna(lvl_b)) and (c > lvl_b)
+        bear_disp = (c < o) and (not pd.isna(lvl_s)) and (c < lvl_s)
+    elif mode == "mtf":
+        # ---- KASKADE MULTI-TIMEFRAME: H1 bias -> M30 likuiditas -> M15 CHoCH
+        # ---- -> M5 trigger presisi. Semua level HTF kausal (bar HTF yang sudah
+        # ---- tertutup SAAT bar M5 ini dievaluasi). Eksekusi tetap di M1.
+        need = ("h1_ema200", "m30_ssl", "m30_bsl", "pd_low", "pd_high",
+                "m30_fsw", "m30_fsh", "m15_swing_h", "m15_swing_l")
+        missing = [k for k in need if k not in m5.columns]
+        if missing:
+            raise ValueError(f"signal_mode='mtf' membutuhkan kolom {missing} di m5 "
+                             "(lihat research/tuning_mtf.py)")
+        # L1 — H1: bias arah (close vs EMA200 H1)
+        if getattr(cfg, "mtf_h1", True):
+            h1ma = row["h1_ema200"]
+            bias_bull = (not pd.isna(h1ma)) and (c > h1ma)
+            bias_bear = (not pd.isna(h1ma)) and (c < h1ma)
+        else:
+            bias_bull = bias_bear = True
+        # L2 — M30: sweep likuiditas mayor dalam jendela mtf_sweep_bars bar M5
+        # terakhir (default 2 = bar i-1..i-2). Definisi level per mtf_m30_mode:
+        #   swing24 = ekstrem 24j rolling | pd = PDH/PDL kemarin | fract = fractal M30
+        if getattr(cfg, "mtf_m30", True):
+            swb = max(1, int(getattr(cfg, "mtf_sweep_bars", 2) or 2))
+            m30mode = getattr(cfg, "mtf_m30_mode", "swing24")
+            lvlmap = {"swing24": ("m30_ssl", "m30_bsl"),
+                      "pd": ("pd_low", "pd_high"),
+                      "fract": ("m30_fsw", "m30_fsh")}
+            if m30mode not in lvlmap:
+                raise ValueError(f"mtf_m30_mode tidak dikenal: {m30mode}")
+            col_buy, col_sell = lvlmap[m30mode]
+            lvl_buy, lvl_sell = row[col_buy], row[col_sell]
+            lo_win = m5["low"].iloc[max(0, i - swb):i]
+            hi_win = m5["high"].iloc[max(0, i - swb):i]
+            sweep_buy = (not pd.isna(lvl_buy)) and bool((lo_win <= lvl_buy).any())
+            sweep_sell = (not pd.isna(lvl_sell)) and bool((hi_win >= lvl_sell).any())
+        else:
+            sweep_buy = sweep_sell = True
+        # L3 — M15: konfirmasi CHoCH (close menembus swing 5-bar M15)
+        if getattr(cfg, "mtf_m15", True):
+            sw15h, sw15l = row["m15_swing_h"], row["m15_swing_l"]
+            choch15_bull = (not pd.isna(sw15h)) and (c > sw15h)
+            choch15_bear = (not pd.isna(sw15l)) and (c < sw15l)
+        else:
+            choch15_bull = choch15_bear = True
+        # L4 — M5: trigger presisi (displacement candle + FVG/swing 5-bar M5)
+        bull_fvg = row["low"] > m5["high"].iat[i - 2] + 0.30
+        bear_fvg = row["high"] < m5["low"].iat[i - 2] - 0.30
+        swing_h5 = m5["high"].iloc[i - 6:i - 1].max()
+        swing_l5 = m5["low"].iloc[i - 6:i - 1].min()
+        trig_bull = (c > o) and (c > swing_h5 or bull_fvg)
+        trig_bear = (c < o) and (c < swing_l5 or bear_fvg)
+
+        # [FIX tuning-lanjutan 08 Sep 2026] jangan return di sini — biarkan gate
+        # trend_filter di bawah tetap berlaku untuk mode mtf (sebelumnya mode mtf
+        # return lebih awal sehingga V*T tanpa efek); return final mtf di ekor fungsi
+        bull_disp = bias_bull and sweep_buy and choch15_bull and trig_bull
+        bear_disp = bias_bear and sweep_sell and choch15_bear and trig_bear
+    else:
+        bull_fvg = row["low"] > m5["high"].iat[i - 2] + 0.30
+        bear_fvg = row["high"] < m5["low"].iat[i - 2] - 0.30
+        swing_h = m5["high"].iloc[i - 6:i - 1].max()
+        swing_l = m5["low"].iloc[i - 6:i - 1].min()
+        bull_disp = (c > o) and (c > swing_h or bull_fvg)
+        bear_disp = (c < o) and (c < swing_l or bear_fvg)
+
+    tf = getattr(cfg, "trend_filter", None)
+    if tf:
+        col = {"sma200d": "ma_sma200d", "ema200d": "ma_ema200d",
+               "ema200m5": "ma_ema200m5"}.get(tf)
+        if col is None:
+            raise ValueError(f"trend_filter tidak dikenal: {tf}")
+        ma = row.get(col, np.nan)
+        if pd.isna(ma):
+            return None
+        if not (c > ma):
+            bull_disp = False
+        if not (c < ma):
+            bear_disp = False
+
+    if mode == "mtf":
+        # kaskade MTF: likuiditas sudah dicek di lapis L2 (M30/PD) — TANPA
+        # syarat sweep sesi Asia/London (itu milik mode choch/cisd)
+        if bull_disp:
+            return "BUY"
+        if bear_disp:
+            return "SELL"
+        return None
+    if (m5["low"].iat[i - 1] <= ssl or m5["low"].iat[i - 2] <= ssl) and bull_disp:
         return "BUY"
-    if (m5["high"].iat[i - 1] >= bsl or m5["high"].iat[i - 2] >= bsl) and \
-       ((c < o) and (c < swing_l or bear_fvg)):
+    if (m5["high"].iat[i - 1] >= bsl or m5["high"].iat[i - 2] >= bsl) and bear_disp:
         return "SELL"
     return None
 
@@ -243,7 +371,7 @@ def signal_at(m5: pd.DataFrame, i: int, cfg: StratCfg) -> str | None:
 # --------------------------------------------------------------------------- #
 class Position:
     __slots__ = ("dir", "entry", "lots", "sl", "tp1", "tp2", "tp3",
-                 "t1", "t2", "t3", "mfe", "realized", "trail", "be",
+                 "t1", "t2", "t3", "mfe", "mae", "realized", "trail", "be",
                  "open_ts", "spread_entry", "pending_sl", "cfg")
 
     def __init__(self, sig, fill, lots, cfg: StratCfg, ts):
@@ -256,6 +384,7 @@ class Position:
         self.tp3 = fill + d * cfg.tp3_pips * PIP
         self.t1 = self.t2 = self.t3 = self.be = False
         self.mfe = 0.0
+        self.mae = 0.0   # [QC scalp 09 Sep 2026] excursi adverse maksimum (negatif)
         self.realized = 0.0
         self.trail = 0
         self.open_ts = ts
@@ -288,6 +417,7 @@ class Position:
         return {"open_ts": self.open_ts, "type": "BUY" if self.dir == 1 else "SELL",
                 "pnl": round(pnl, 2), "res": res, "reason": reason,
                 "mfe": round(self.mfe, 3), "mfe_pips": round(self.mfe / PIP, 1),
+                "mae": round(self.mae, 3), "mae_pips": round(-self.mae / PIP, 1),
                 "tp1": self.t1, "tp2": self.t2, "tp3": self.t3,
                 "trail": self.trail, "be": self.be, "lots": self.lots,
                 "spread_entry": round(self.spread_entry, 3),
@@ -351,84 +481,98 @@ def run_backtest(m1: pd.DataFrame, m5: pd.DataFrame, cfg: StratCfg,
     per_day, consec, cur_day = 0, 0, None
     m1_day = m1["srv_date"].to_numpy()      # batas hari = tengah malam SERVER
 
+    strict = getattr(cfg, "strict_bar_open_entry", False)
+
+    def _manage(k: int) -> None:
+        """Manajemen posisi pada bar k: SL/TP bertingkat + trailing, pesimis [A5].
+        [QC eksekusi-M5] closure agar dapat dipanggil ULANG untuk bar eksekusi
+        saat cfg.manage_entry_bar=True — candle entry tidak boleh kebal SL/TP
+        karena order SL/TP sudah hidup di sisi broker sejak entry."""
+        nonlocal pos, capital, consec
+        d = pos.dir
+        if pos.pending_sl is not None:                    # [A6]
+            pos.sl = pos.pending_sl
+            pos.pending_sl = None
+        if d == 1:
+            pos.mfe = max(pos.mfe, hb[k] - pos.entry)
+            pos.mae = min(pos.mae, lb[k] - pos.entry)
+            hit_sl = lb[k] <= pos.sl
+            hit_tp1 = (not pos.t1) and hb[k] >= pos.tp1
+            # [A5] SL diuji lebih dulu kecuali varian uji tp_first
+            if hit_sl and not (tp_first and hit_tp1):
+                trades.append(pos.book(pos.sl, "SL"))
+                capital += trades[-1]["pnl"]; eq.append(capital)
+                consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
+                pos = None
+            else:
+                if hit_tp1:
+                    pos.realized += _tier_pnl(pos, pos.tp1, cfg.r1)
+                    pos.t1 = pos.be = True
+                    pos.raise_sl(pos.entry)
+                if pos.t1 and not pos.t2 and hb[k] >= pos.tp2:
+                    pos.realized += _tier_pnl(pos, pos.tp2, cfg.r2)
+                    pos.t2 = True
+                if pos.t2 and not pos.t3 and hb[k] >= pos.tp3:
+                    pos.realized += _tier_pnl(pos, pos.tp3, cfg.r3)
+                    pos.t3 = True
+                    pos.raise_sl(pos.tp1)
+                if pos.remaining() <= 1e-9:
+                    lvl = pos.tp3 if pos.t3 else (pos.tp2 if pos.t2 else pos.tp1)
+                    trades.append(pos.book(lvl, "TP-FULL"))
+                    capital += trades[-1]["pnl"]; eq.append(capital)
+                    consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
+                    pos = None
+                if pos is not None:
+                    kk = int(pos.mfe // step_d)
+                    if kk >= 1 and kk > pos.trail:
+                        pos.raise_sl(pos.entry + (kk - 1) * step_d + lock_d)
+                        pos.trail = kk
+        else:
+            pos.mfe = max(pos.mfe, pos.entry - la[k])
+            pos.mae = min(pos.mae, pos.entry - ha[k])
+            hit_sl = ha[k] >= pos.sl
+            hit_tp1 = (not pos.t1) and la[k] <= pos.tp1
+            if hit_sl and not (tp_first and hit_tp1):
+                trades.append(pos.book(pos.sl, "SL"))
+                capital += trades[-1]["pnl"]; eq.append(capital)
+                consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
+                pos = None
+            else:
+                if hit_tp1:
+                    pos.realized += _tier_pnl(pos, pos.tp1, cfg.r1)
+                    pos.t1 = pos.be = True
+                    pos.raise_sl(pos.entry)
+                if pos.t1 and not pos.t2 and la[k] <= pos.tp2:
+                    pos.realized += _tier_pnl(pos, pos.tp2, cfg.r2)
+                    pos.t2 = True
+                if pos.t2 and not pos.t3 and la[k] <= pos.tp3:
+                    pos.realized += _tier_pnl(pos, pos.tp3, cfg.r3)
+                    pos.t3 = True
+                    pos.raise_sl(pos.tp1)
+                if pos.remaining() <= 1e-9:
+                    lvl = pos.tp3 if pos.t3 else (pos.tp2 if pos.t2 else pos.tp1)
+                    trades.append(pos.book(lvl, "TP-FULL"))
+                    capital += trades[-1]["pnl"]; eq.append(capital)
+                    consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
+                    pos = None
+                if pos is not None:
+                    kk = int(pos.mfe // step_d)
+                    if kk >= 1 and kk > pos.trail:
+                        pos.raise_sl(pos.entry - ((kk - 1) * step_d + lock_d))
+                        pos.trail = kk
+
     for k in range(n1):
+        pos_open_at_start = pos is not None     # [QC eksekusi-M5] utk strict_bar_open_entry
         if m1_day[k] != cur_day:
             cur_day = m1_day[k]
             per_day = 0
             consec = 0        # icas_strategy.reset_daily_stats_if_new_day()
 
         if pos is not None:
-            d = pos.dir
-            if pos.pending_sl is not None:                # [A6]
-                pos.sl = pos.pending_sl
-                pos.pending_sl = None
-            if d == 1:
-                pos.mfe = max(pos.mfe, hb[k] - pos.entry)
-                hit_sl = lb[k] <= pos.sl
-                hit_tp1 = (not pos.t1) and hb[k] >= pos.tp1
-                # [A5] SL diuji lebih dulu kecuali varian uji tp_first
-                if hit_sl and not (tp_first and hit_tp1):
-                    trades.append(pos.book(pos.sl, "SL"))
-                    capital += trades[-1]["pnl"]; eq.append(capital)
-                    consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
-                    pos = None
-                else:
-                    if hit_tp1:
-                        pos.realized += _tier_pnl(pos, pos.tp1, cfg.r1)
-                        pos.t1 = pos.be = True
-                        pos.raise_sl(pos.entry)
-                    if pos.t1 and not pos.t2 and hb[k] >= pos.tp2:
-                        pos.realized += _tier_pnl(pos, pos.tp2, cfg.r2)
-                        pos.t2 = True
-                    if pos.t2 and not pos.t3 and hb[k] >= pos.tp3:
-                        pos.realized += _tier_pnl(pos, pos.tp3, cfg.r3)
-                        pos.t3 = True
-                        pos.raise_sl(pos.tp1)
-                    if pos.remaining() <= 1e-9:
-                        lvl = pos.tp3 if pos.t3 else (pos.tp2 if pos.t2 else pos.tp1)
-                        trades.append(pos.book(lvl, "TP-FULL"))
-                        capital += trades[-1]["pnl"]; eq.append(capital)
-                        consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
-                        pos = None
-                    if pos is not None:
-                        kk = int(pos.mfe // step_d)
-                        if kk >= 1 and kk > pos.trail:
-                            pos.raise_sl(pos.entry + (kk - 1) * step_d + lock_d)
-                            pos.trail = kk
-            else:
-                pos.mfe = max(pos.mfe, pos.entry - la[k])
-                hit_sl = ha[k] >= pos.sl
-                hit_tp1 = (not pos.t1) and la[k] <= pos.tp1
-                if hit_sl and not (tp_first and hit_tp1):
-                    trades.append(pos.book(pos.sl, "SL"))
-                    capital += trades[-1]["pnl"]; eq.append(capital)
-                    consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
-                    pos = None
-                else:
-                    if hit_tp1:
-                        pos.realized += _tier_pnl(pos, pos.tp1, cfg.r1)
-                        pos.t1 = pos.be = True
-                        pos.raise_sl(pos.entry)
-                    if pos.t1 and not pos.t2 and la[k] <= pos.tp2:
-                        pos.realized += _tier_pnl(pos, pos.tp2, cfg.r2)
-                        pos.t2 = True
-                    if pos.t2 and not pos.t3 and la[k] <= pos.tp3:
-                        pos.realized += _tier_pnl(pos, pos.tp3, cfg.r3)
-                        pos.t3 = True
-                        pos.raise_sl(pos.tp1)
-                    if pos.remaining() <= 1e-9:
-                        lvl = pos.tp3 if pos.t3 else (pos.tp2 if pos.t2 else pos.tp1)
-                        trades.append(pos.book(lvl, "TP-FULL"))
-                        capital += trades[-1]["pnl"]; eq.append(capital)
-                        consec = consec + 1 if trades[-1]["res"] == "LOSS" else 0
-                        pos = None
-                    if pos is not None:
-                        kk = int(pos.mfe // step_d)
-                        if kk >= 1 and kk > pos.trail:
-                            pos.raise_sl(pos.entry - ((kk - 1) * step_d + lock_d))
-                            pos.trail = kk
+            _manage(k)
 
-        if pos is None and k in entries:
+        if pos is None and k in entries \
+           and not (strict and pos_open_at_start):
             if per_day < cfg.max_trades_per_day and consec < cfg.max_consec_losses \
                and capital > 0 and (tf is None or m1_day[k] >= tf):
                 sig = entries[k]
@@ -437,6 +581,12 @@ def run_backtest(m1: pd.DataFrame, m5: pd.DataFrame, cfg: StratCfg,
                 pos = Position(sig, fill, lots, cfg, t1[k])
                 pos.spread_entry = spr[k]
                 per_day += 1
+                if cfg.manage_entry_bar and pos is not None:
+                    # [QC eksekusi-M5] candle eksekusi ikut diuji SL/TP:
+                    # entry di OPEN candle, H/L-nya terjadi SETELAH open (kausal),
+                    # dan SL/TP broker sudah aktif — tanpa ini candle entry kebal
+                    # SL/TP selama 5 menit = optimis (kontrol acak membuktikannya).
+                    _manage(k)
 
     tdf = pd.DataFrame(trades)
     m5w = m5 if tf is None else m5[m5.index >= pd.Timestamp(trade_from)]

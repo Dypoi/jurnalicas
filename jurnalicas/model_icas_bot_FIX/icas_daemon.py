@@ -39,6 +39,7 @@ from config import config
 from src.execution.mt5_bridge import IcasMT5Bridge
 from src.execution.trade_journal import TradeJournal
 from src.strategy.icas_strategy import ModelIcasStrategy
+from src.strategy.g4_strategy import G4Strategy, frames_from_raw
 from src.indicators.sessions import calculate_session_killzones, is_current_in_burst
 from src.state_store import StateStore
 
@@ -53,13 +54,20 @@ LOT_EPS = 0.011   # toleransi 1 step lot
 
 
 def _journal_close(journal: TradeJournal, bridge: IcasMT5Bridge, ticket, context: str,
-                   extra: dict = None, attempts: int = 3) -> dict:
+                   extra: dict = None, attempts: int = 3,
+                   pending_pnl: dict = None) -> dict:
     """Catat penutupan posisi ke jurnal; PnL direkonsiliasi dari deal broker bila bisa.
 
     [AUDIT FIX LIVE-01] Riwayat deal broker bisa telat beberapa detik setelah
     posisi tertutup; coba ulang sebentar agar realized_total tidak kosong.
     Return dict info (mungkin kosong) supaya pemanggil bisa membedakan
     "bukti tutup ada" vs "riwayat kosong".
+
+    [AUDIT FORENSIK 3 — A3-03] Bila PnL tetap tidak terbaca (riwayat deal masih
+    flaky tepat setelah koneksi pulih — persis momen rawan), tiket didaftarkan
+    ke `pending_pnl` untuk di-backfill di siklus-siklus berikutnya. Tanpa ini,
+    event position_closed tertulis TANPA realized_total dan PnL-nya hilang
+    permanen dari jurnal (PF/net dashboard diam-diam salah).
     """
     info = None
     for _att in range(max(1, attempts)):
@@ -81,6 +89,10 @@ def _journal_close(journal: TradeJournal, bridge: IcasMT5Bridge, ticket, context
                     f"({info['result']}, {info['deals_out']} deal OUT)")
     else:
         logger.info(f"🧾 Jurnal: tiket {ticket} closed ({context}) -> PnL tidak tersedia (riwayat deal kosong)")
+        if pending_pnl is not None:
+            pending_pnl[ticket] = {"attempts": 0, "registered_at": time.time()}
+            logger.info(f"🔎 PnL tiket {ticket} masuk antrean backfill (dicoba ulang "
+                        f"di siklus berikutnya).")
     return info or {}
 
 
@@ -105,9 +117,34 @@ def _write_health_marker(path: str, journal_health: dict, bridge: IcasMT5Bridge,
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False)
-        os.replace(tmp, path)
+        # [A3-05] retry singkat: os.replace di Windows bisa tersandung sharing
+        # violation saat dashboard membuka file ini persis pada saat yang sama.
+        for _att in range(3):
+            try:
+                os.replace(tmp, path)
+                break
+            except OSError:
+                time.sleep(0.03)
     except Exception:
         pass  # marker bersifat informatif, tidak boleh mengganggu daemon
+
+
+def _sl_improves(pos_type: str, new_sl: float, cur_sl: float) -> bool:
+    """[PARITAS EXIT G4 — 09 Sep 2026] SL hanya boleh bergerak MENDEKAT ke arah
+    profit (monotonic) — replika eksak ``Position.raise_sl`` engine riset
+    (research/backtest_m1_audit.py: hanya raise utk BUY / lower utk SELL).
+
+    Tanpa guard ini, blok BE-lock pasca-TP1 dan step-SL-ke-TP1 pasca-TP3 di
+    daemon MENGEMBALIKAN SL yang sudah dikunci trailing ke level yang lebih
+    rendah (contoh nyata: trailing G4 sudah mengunci +130 pips, TP1 lalu
+    menurunkan SL ke ~+5,6 pips; pasca-TP3 trailing +530 pips diturunkan ke
+    +187,5 pips) — runner memberi kembali profit yang seharusnya terlindungi,
+    dan hasil live menyimpang dari backtest (+$4.493 mengasumsikan SL monoton,
+    lihat LAPORAN_STRATEGI_G4.md §Exit).
+    """
+    if pos_type == "BUY":
+        return new_sl > float(cur_sl or 0.0) + 1e-9
+    return new_sl < float(cur_sl) - 1e-9
 
 
 def main():
@@ -139,8 +176,15 @@ def main():
                            getattr(config, "JOURNAL_ENABLED", True),
                            getattr(config, "ENGINE_VERSION", "v2"),
                            max_bytes=getattr(config, "JOURNAL_MAX_BYTES", 0),
-                           keep_rotated=getattr(config, "JOURNAL_KEEP_ROTATED", 5))
-    strategy = ModelIcasStrategy(config)
+                           keep_rotated=getattr(config, "JOURNAL_KEEP_ROTATED", 5),
+                           fsync=getattr(config, "JOURNAL_FSYNC", True))   # [A3-06]
+    # [G4 09 Sep 2026] pilih engine sesuai config.STRATEGY:
+    #   "G4"  = kaskade MTF (H1/PDH-PDL-24j/M15/M5) — default baru
+    #   "ICAS" = sinyal lama choch+sesi (rollback)
+    if getattr(config, "STRATEGY", "ICAS") == "G4":
+        strategy = G4Strategy(config)
+    else:
+        strategy = ModelIcasStrategy(config)
 
     # [AUDIT FIX S-03] Persistensi state: pulihkan counter harian & siapkan store
     state_store = StateStore(config.STATE_FILE,
@@ -148,12 +192,18 @@ def main():
     today_str = str(datetime.datetime.now().date())
     last_day_str = today_str
     restored_daily = state_store.get_daily(today_str)
-    if restored_daily["daily_trades_count"] > 0:
+    # [AUDIT 3] current_date WAJIB ikut diset bila ADA state yang dipulihkan —
+    # bila hanya consecutive_losses yang > 0, current_date lama tetap None lalu
+    # reset_daily_stats_if_new_day() di siklus pertama MENGHAPUS circuit breaker
+    # yang baru saja dipulihkan.
+    if restored_daily["daily_trades_count"] > 0 or restored_daily["consecutive_losses"] > 0:
         strategy.daily_trades_count = restored_daily["daily_trades_count"]
+        if restored_daily["consecutive_losses"] > 0:
+            strategy.consecutive_losses = restored_daily["consecutive_losses"]   # [F-16]
         strategy.current_date = datetime.datetime.now().date()
-        logger.info(f"♻️ Counter harian dipulihkan dari state store: {restored_daily['daily_trades_count']} sinyal hari ini")
-    if restored_daily["consecutive_losses"] > 0:
-        strategy.consecutive_losses = restored_daily["consecutive_losses"]   # [F-16]
+        logger.info(f"♻️ Counter harian dipulihkan dari state store: "
+                    f"{restored_daily['daily_trades_count']} sinyal, "
+                    f"{restored_daily['consecutive_losses']} loss beruntun hari ini")
     merged_state_tickets = set()
     adopted_logged = set()
     # [F-07] Pelacakan MULTI-tiket. Dulu hanya satu `last_position_ticket`, sehingga
@@ -161,10 +211,43 @@ def main():
     # penutupan tiket lama HILANG permanen dari jurnal (terbukti pada tiket
     # 5009576843: tutup 31 Agu 09:50, baru tercatat 02 Sep 08:46 sebagai offline).
     open_tickets = {}          # ticket -> {"snapshot": dict, "misses": int}
+    # [AUDIT FORENSIK 3 — A3-03] antrean PnL backfill: tiket yang tutup tetapi
+    # PnL-nya gagal dibaca saat konfirmasi (riwayat deal flaky pasca-putus).
+    pending_pnl = {}           # ticket -> {"attempts": int, "registered_at": float}
+    PNL_BACKFILL_INTERVAL = int(getattr(config, "JOURNAL_PNL_BACKFILL_INTERVAL_SECONDS", 30))
+    PNL_BACKFILL_MAX_ATTEMPTS = int(getattr(config, "JOURNAL_PNL_BACKFILL_MAX_ATTEMPTS", 120))
+    last_pnl_backfill_try = 0.0
     POSITION_MISS_LIMIT = int(getattr(config, "POSITION_MISS_LIMIT", 5))
     REQUIRE_PROOF = bool(getattr(config, "CLOSE_REQUIRE_BROKER_PROOF", True))
     REVIVE_WINDOW = int(getattr(config, "POSITION_REVIVE_WINDOW_SECONDS", 3600))
     MAX_PENDING_CLOSE = int(getattr(config, "MAX_PENDING_CLOSE_SECONDS", 900))
+
+    def _defer_ticket(tk, why: str) -> None:
+        """[AUDIT FORENSIK 3 — A3-02a] Tiket yang status penutupannya BELUM
+        pasti harus tetap MENAHAN mutex entry.
+
+        Bug lama: tiket yang rekonsiliasi startup-nya ditunda (feed tidak sehat /
+        status tidak pasti / riwayat tak terbaca / bukti volume belum lunas) TIDAK
+        pernah dimasukkan ke `open_tickets`. Akibatnya, bila positions_get() ikut
+        mengembalikan tuple kosong (terminal belum sync / koneksi broker goyah
+        dengan tick cache yang masih segar), daemon melihat "tidak ada posisi"
+        dan MEMBUKA POSISI KEDUA padahal posisi pertama masih hidup.
+        Kini tiket tertunda ikut memegang mutex — dibatasi katup pengaman
+        MAX_PENDING_CLOSE_SECONDS agar bot tidak macet selamanya.
+        """
+        try:
+            tk_int = int(tk)
+        except (TypeError, ValueError):
+            return
+        if tk_int not in open_tickets:
+            open_tickets[tk_int] = {
+                "snapshot": state_store.get_position(tk) or {},
+                "misses": 0,
+                "pending_since": time.time(),
+                "deferred_reason": why,
+            }
+            logger.info(f"🔒 Tiket {tk_int} menahan mutex entry (alasan: {why}) sampai "
+                        f"penutupannya terbukti atau katup {MAX_PENDING_CLOSE}s tercapai.")
 
     # -------------------- [ENGINE v2] STARTUP RECONCILIATION (on/off laptop) ----
     # Jurnal siklus hidup + snapshot config — bukti config yang benar-benar dipakai.
@@ -195,9 +278,13 @@ def main():
             logger.warning("⚠️ Terminal/feed MT5 belum sehat saat startup — "
                            "rekonsiliasi on/off DITUNDA (state tidak disentuh).")
             journal.log("startup_reconcile_deferred", reason="feed_unhealthy")
+            for _t in state_store.list_position_tickets():   # [A3-02a]
+                _defer_ticket(_t, "startup_feed_unhealthy")
     except Exception as e:
         logger.warning(f"Pembacaan posisi saat startup gagal (tidak fatal): {e}")
         journal.log("startup_reconcile_deferred", reason=f"{type(e).__name__}: {e}")
+        for _t in state_store.list_position_tickets():       # [A3-02a]
+            _defer_ticket(_t, "startup_read_error")
 
     if feed_ok_at_startup:
         open_ticket_now = str(open_pos_now["ticket"]) if open_pos_now else None
@@ -211,6 +298,7 @@ def main():
                             f"({status}) -> state DIPERTAHANKAN, tunda konfirmasi.")
                 journal.log("startup_reconcile_deferred", ticket=t,
                             reason="ticket_status_unknown")
+                _defer_ticket(t, f"ticket_status_unknown_{status}")   # [A3-02a]
                 continue
             closed_vol = bridge.get_position_closed_volume(t) if REQUIRE_PROOF else None
             stored = state_store.get_position(t) or {}
@@ -221,6 +309,7 @@ def main():
                                    f"-> state DIPERTAHANKAN.")
                     journal.log("startup_reconcile_deferred", ticket=t,
                                 reason="history_unavailable")
+                    _defer_ticket(t, "history_unavailable")           # [A3-02a]
                     continue
                 if initial_vol > 0 and closed_vol + LOT_EPS < initial_vol:
                     logger.warning(f"🔎 Rekonsiliasi: tiket {t} baru tertutup {closed_vol:.2f} "
@@ -229,10 +318,11 @@ def main():
                     journal.log("startup_reconcile_deferred", ticket=t,
                                 reason="partial_close_only",
                                 closed_volume=closed_vol, initial_volume=initial_vol)
+                    _defer_ticket(t, "partial_close_only")            # [A3-02a]
                     continue
             logger.info(f"🔎 Rekonsiliasi: tiket {t} terbukti tidak lagi terbuka -> "
                         f"tertutup saat daemon OFF")
-            _journal_close(journal, bridge, t, context="offline")
+            _journal_close(journal, bridge, t, context="offline", pending_pnl=pending_pnl)
             state_store.mark_closed(t, reason="offline_reconcile")   # [F-03]
 
     # (b) Adopsi posisi yang masih terbuka (sisa sesi sebelumnya)
@@ -260,6 +350,77 @@ def main():
 
     consecutive_cycle_errors = 0
     MAX_CYCLE_ERRORS = int(getattr(config, "MAX_CONSECUTIVE_CYCLE_ERRORS", 20))
+
+    # ====================================================================
+    # [G4 09 Sep 2026] Closure pengiriman sinyal — dipakai BERSAMA oleh jalur
+    # evaluasi G4 (kaskade MTF) dan jalur lama ICAS (choch+sesi), agar logika
+    # jurnal + order + state tetap SATU (tidak diduplikasi).
+    # ====================================================================
+    def _emit_and_send(sig, balance: float, spread_usd_now: float) -> None:
+        logger.info(f"⚡ SINYAL TERDETEKSI [{config.STRATEGY}]: {sig.type} | Entry: {sig.entry_price:.2f} | SL: {sig.stop_loss:.2f} | TP1: {sig.tp1_price:.2f} | TP2: {sig.tp2_price:.2f} | TP3: {sig.tp3_price:.2f} | Lot: {sig.lot_size}")
+        journal.log("signal_detected", type=sig.type,
+                    entry=round(sig.entry_price, 4), sl=round(sig.stop_loss, 4),
+                    tp1=round(sig.tp1_price, 4), tp2=round(sig.tp2_price, 4),
+                    tp3=round(sig.tp3_price, 4), lot=sig.lot_size,
+                    spread_usd=round(spread_usd_now, 4), balance=round(balance, 2))
+        ticket = bridge.send_order(sig.type, sig.lot_size, sig.stop_loss, None)
+        if ticket is not None:
+            strategy.daily_trades_count += 1
+            state_store.save_daily(today_str, strategy.daily_trades_count,
+                                   strategy.consecutive_losses)   # [AUDIT FIX S-03]
+            merged_state_tickets.add(ticket)
+            adopted_logged.add(ticket)   # posisi baru sesi ini -> bukan adopsi
+            logger.info(f"✅ Order Berhasil Dieksekusi di MT5! Ticket: {ticket} (Trade Hari Ini: {strategy.daily_trades_count})")
+            # [F-17] harga fill NYATA + slippage terukur.
+            # Konvensi tanda: POSITIF = adverse (merugikan), NEGATIF = favorable.
+            #   BUY  : slip = fill - anchor  (isi di atas anchor = buruk)
+            #   SELL : slip = anchor - fill  (isi di bawah anchor = buruk)
+            _f = getattr(bridge, "last_fill", None) or {}
+            _fp = _f.get("price") or 0.0
+            _slip = None
+            if _fp:
+                _slip = round((_fp - sig.entry_price)
+                              if sig.type == "BUY"
+                              else (sig.entry_price - _fp), 4)
+                if _slip > 1.0:
+                    logger.warning(f"⚠️ Slippage ADVERSE +{_slip:.2f} USD "
+                                   f"({_slip*10:.0f} pips) — di atas asumsi "
+                                   f"${config.SLIPPAGE_USD:.2f}. Pantau polanya "
+                                   f"di jurnal (field slippage_usd); bila rutin "
+                                   f"> $0.50 di jam likuid normal, hentikan & evaluasi.")
+                elif _slip < -1.0:
+                    logger.info(f"💨 Slippage FAVORABLE {_slip:+.2f} USD "
+                                f"({(-_slip)*10:.0f} pips LEBIH BAIK dari anchor) — "
+                                f"tidak menambah risiko.")
+                # [PARITAS SL — 10 Sep 2026, pelajaran log tiket 5075405797]
+                # Engine riset menjangkar SL ke harga FILL (fill ∓ SL). Live
+                # mengirim SL dijangkar ke anchor sinyal; bila fill menyimpang
+                # > $0.50 (mis. eksekusi telat karena koneksi putus), geometri
+                # efektif bergeser (SL 123 pips, bukan 150). Re-anchor ke fill
+                # mengembalikan geometri PERSIS engine.
+                if abs(_slip) > 0.50:
+                    _sl_dist = config.STOP_LOSS_PIPS * 0.10
+                    _new_sl = (_fp - _sl_dist) if sig.type == "BUY" else (_fp + _sl_dist)
+                    if bridge.modify_sl(ticket, _new_sl):
+                        logger.info(f"🔧 SL re-anchor ke fill: {_new_sl:.2f} "
+                                    f"(fill {(_fp):.2f} menyimpang {abs(_slip):.2f} "
+                                    f"dari anchor — SL kembali persis "
+                                    f"{config.STOP_LOSS_PIPS:.0f} pips dari harga isi)")
+                        journal.log("sl_reanchor", ticket=ticket,
+                                    fill_price=round(_fp, 4),
+                                    new_sl=round(_new_sl, 4),
+                                    old_sl=round(sig.stop_loss, 4),
+                                    deviation_usd=round(abs(_slip), 4))
+            journal.log("order_open", ticket=ticket, type=sig.type,
+                        lot=sig.lot_size, entry=round(sig.entry_price, 4),
+                        fill_price=round(_fp, 4) if _fp else None,
+                        slippage_usd=_slip,
+                        sl=round(sig.stop_loss, 4),
+                        daily_count=strategy.daily_trades_count)
+        else:
+            logger.warning("❌ Order GAGAL dieksekusi MT5 — lihat log bridge di atas.")
+            journal.log("order_failed", type=sig.type, lot=sig.lot_size,
+                        entry=round(sig.entry_price, 4), sl=round(sig.stop_loss, 4))
 
     try:
         while True:
@@ -302,6 +463,39 @@ def main():
                                 journal_errors=journal.error_count)
                 except Exception:
                     pass
+
+            # ==================================================================
+            # [AUDIT FORENSIK 3 — A3-03] PNL BACKFILL — tiket yang tutup tetapi
+            # PnL-nya gagal dibaca saat konfirmasi tutup (riwayat deal flaky
+            # tepat setelah koneksi pulih) dicoba ulang di sini. Event
+            # position_closed_pnl_backfill melengkapi jurnal retroaktif.
+            # ==================================================================
+            if pending_pnl and PNL_BACKFILL_INTERVAL >= 0 and \
+                    now_time - last_pnl_backfill_try >= PNL_BACKFILL_INTERVAL:
+                last_pnl_backfill_try = now_time
+                for _tk in list(pending_pnl.keys()):
+                    _ent = pending_pnl[_tk]
+                    _ent["attempts"] = _ent.get("attempts", 0) + 1
+                    if _ent["attempts"] > PNL_BACKFILL_MAX_ATTEMPTS:
+                        del pending_pnl[_tk]
+                        journal.log("position_closed_pnl_missing", ticket=_tk,
+                                    reason="max_backfill_attempts",
+                                    attempts=PNL_BACKFILL_MAX_ATTEMPTS)
+                        logger.warning(f"⚠️ PnL tiket {_tk} tidak bisa direkonstruksi "
+                                       f"setelah {PNL_BACKFILL_MAX_ATTEMPTS} percobaan — "
+                                       f"dicatat sebagai missing di jurnal.")
+                        continue
+                    try:
+                        _info = bridge.get_position_realized(_tk)
+                    except Exception:
+                        _info = None
+                    if _info:
+                        journal.log("position_closed_pnl_backfill", ticket=_tk,
+                                    attempts=_ent["attempts"], **_info)
+                        logger.info(f"🧾 PnL tiket {_tk} berhasil di-backfill: "
+                                    f"realized ${_info['realized_total']:+,.2f} "
+                                    f"({_info['result']}, {_info['deals_out']} deal OUT)")
+                        del pending_pnl[_tk]
 
             # ==================================================================
             # [F-04] GUARD FEED — satu pemeriksaan untuk seluruh siklus.
@@ -452,10 +646,12 @@ def main():
                         v = min_lot
                     return round(min(v, remaining_vol), 2)
 
-                # 1A. Early BE+ Check (NONAKTIF pada engine v2: trigger 9999)
+                # 1A. Early BE+ Check (NONAKTIF pada engine v2/G4: trigger 9999)
                 if not pos.get("be_set", False) and fav_pips >= config.EARLY_BE_TRIGGER_PIPS:
                     new_sl = ep + be_offset if pos["type"] == "BUY" else ep - be_offset
-                    if sl_clearance_ok(new_sl) and bridge.modify_sl(pos["ticket"], new_sl):
+                    if (_sl_improves(pos["type"], new_sl, pos.get("sl"))
+                            and sl_clearance_ok(new_sl) and bridge.modify_sl(pos["ticket"], new_sl)):
+                        pos["sl"] = new_sl
                         pos["be_set"] = True
                         logger.info(f"🛡️ Early BE+ Aktif pada Ticket {pos['ticket']}! SL dikunci di {new_sl:.2f} (Guaranteed Profit)")
                         journal.log("be_lock", ticket=pos["ticket"], trigger="early_be",
@@ -474,10 +670,19 @@ def main():
                         journal.log("tp_hit", ticket=pos["ticket"], level=1, close_vol=close_vol,
                                     fav_pips=round(cur_fav_pips, 1), remaining_vol=remaining_vol)
                         new_sl = ep + be_offset if pos["type"] == "BUY" else ep - be_offset
-                        if sl_clearance_ok(new_sl) and bridge.modify_sl(pos["ticket"], new_sl):
+                        # [PARITAS EXIT] BE-lock pasca-TP1 hanya bila MENAIKkan SL
+                        # (replika engine: raise_sl(entry) monotonic) — jangan
+                        # menurunkan kunci trailing yang sudah lebih tinggi.
+                        if _sl_improves(pos["type"], new_sl, pos.get("sl")) \
+                                and sl_clearance_ok(new_sl) and bridge.modify_sl(pos["ticket"], new_sl):
+                            pos["sl"] = new_sl
                             pos["be_set"] = True
                             journal.log("be_lock", ticket=pos["ticket"], trigger="post_tp1",
                                         new_sl=round(new_sl, 4))
+                        else:
+                            # SL sudah lebih baik (trailing) — tandai BE tercapai
+                            # tanpa menurunkan SL (identik engine: pos.be = True).
+                            pos["be_set"] = True
 
                 # 1C. TP2 Check (+375 pips -> Close 25% lot)
                 if pos.get("tp1_hit", False) and not pos.get("tp2_hit", False) and tp_metric_pips >= config.TP2_PIPS:
@@ -500,19 +705,29 @@ def main():
                         logger.info(f"🎯 TP3 Hit (3.75xSL / +{config.TP3_PIPS:.0f} pips)! Closed {close_vol} lots ({config.TP3_LOT_RATIO*100:.0f}%) pada Ticket {pos['ticket']}")
                         # Step SL to TP1
                         tp1_price = ep + (config.TP1_PIPS * 0.10) if pos["type"] == "BUY" else ep - (config.TP1_PIPS * 0.10)
-                        if sl_clearance_ok(tp1_price) and bridge.modify_sl(pos["ticket"], tp1_price):
+                        # [PARITAS EXIT] step-ke-TP1 hanya bila meningkatkan SL —
+                        # pasca-TP3 trailing G4 biasanya sudah mengunci jauh di
+                        # atas TP1 (mis. +530p vs +187,5p); engine TIDAK pernah
+                        # menurunkan (raise_sl monotonic).
+                        if _sl_improves(pos["type"], tp1_price, pos.get("sl")) \
+                                and sl_clearance_ok(tp1_price) and bridge.modify_sl(pos["ticket"], tp1_price):
+                            pos["sl"] = tp1_price
                             logger.info(f"🚀 SL Runner Otomatis Dinaikkan ke Level TP1: {tp1_price:.2f} (+{config.TP1_PIPS:.0f} pips Locked)!")
                             journal.log("sl_step_to_tp1", ticket=pos["ticket"], new_sl=round(tp1_price, 4))
+                            pos["be_set"] = True
+                        else:
                             pos["be_set"] = True
                         journal.log("tp_hit", ticket=pos["ticket"], level=3, close_vol=close_vol,
                                     fav_pips=round(cur_fav_pips, 1), sl_moved_to_tp1=pos["be_set"])
 
-                # 1E. Trailing Step for Runner beyond TP3 (Every 100 pips -> Lock 30 pips)
+                # 1E. Trailing Step (G4: setiap 50 pips MFE -> lock 30 pips + 50/step)
                 k_step = int(fav_pips // config.TRAILING_STEP_PIPS)
                 if k_step >= 1 and k_step > pos.get("trail_step", 0):
                     lock_dist = (k_step - 1) * (config.TRAILING_STEP_PIPS * 0.10) + (config.TRAILING_LOCK_PIPS * 0.10)
                     new_sl = ep + lock_dist if pos["type"] == "BUY" else ep - lock_dist
-                    if sl_clearance_ok(new_sl) and bridge.modify_sl(pos["ticket"], new_sl):
+                    if _sl_improves(pos["type"], new_sl, pos.get("sl")) \
+                            and sl_clearance_ok(new_sl) and bridge.modify_sl(pos["ticket"], new_sl):
+                        pos["sl"] = new_sl
                         pos["trail_step"] = k_step
                         logger.info(f"🚀 Trailing Runner Step {k_step} Aktif! SL dinaikkan ke {new_sl:.2f} (Lock profit +{lock_dist*10:.0f} pips)")
                         journal.log("trail_update", ticket=pos["ticket"], step=k_step,
@@ -574,7 +789,8 @@ def main():
                                              "tp2_hit": snap.get("tp2_hit"),
                                              "tp3_hit": snap.get("tp3_hit"),
                                              "trail_step": snap.get("trail_step"),
-                                             "max_fav_usd": snap.get("max_fav")})
+                                             "max_fav_usd": snap.get("max_fav")},
+                                      pending_pnl=pending_pnl)
                 state_store.mark_closed(tk, reason="online_confirmed")   # [F-03]
                 open_tickets.pop(tk, None)
                 if visible_ticket is None:
@@ -620,57 +836,79 @@ def main():
             if pos is None and not _blocking:
                 can_trade, reason = strategy.can_trade_today()
                 if can_trade:
-                    df_m5_raw = bridge.get_latest_m5_candles(count=150)
-                    if not df_m5_raw.empty and len(df_m5_raw) >= 15:
-                        df_m5 = calculate_session_killzones(df_m5_raw)
-                        latest_bar_idx = len(df_m5) - 2 # Latest completed candle
-                        latest_time = df_m5['time'].iloc[latest_bar_idx]
+                    if getattr(config, "STRATEGY", "ICAS") == "G4":
+                        # ============================================================
+                        # [G4] KASKADE MTF — evaluasi pada bar M5 yang BARU TERTUTUP.
+                        # frames_from_raw: konversi server->UTC + buang bar berjalan.
+                        # Mutex 1-posisi + evaluasi tepat setelah close M5 =
+                        # perilaku strict_bar_open_entry & manage_entry_bar engine
+                        # riset (lihat research/g4_parity_check.py).
+                        # ============================================================
+                        # M5 1500 (~5,2 hari bursa: sweep 288 + PD penuh utk
+                        # Senin pagi), M15 1000 (~10 hari), H1 5000 (~7 bulan:
+                        # burn-in EMA200-grid < $0,001 — lihat g4_parity_check).
+                        frames = frames_from_raw(
+                            bridge.get_latest_candles("M5", 1500),
+                            bridge.get_latest_candles("M15", 1000),
+                            bridge.get_latest_candles("H1", 5000))
+                        if frames is not None:
+                            df5, df15, dfh1 = frames
+                            if (len(df5) >= 350 and len(df15) >= 20
+                                    and len(dfh1) >= int(getattr(config, "G4_MIN_H1_BARS", 260))):
+                                latest_time = df5.index[-1]
+                                if latest_time != last_scanned_bar_time:
+                                    last_scanned_bar_time = latest_time
+                                    # [GUARD USIA BAR — 10 Sep 2026, pelajaran
+                                    # tiket 5075405797] Backtest mengasumsikan
+                                    # entry ≈ OPEN bar setelah sinyal. Bila
+                                    # koneksi putus, bar tertutup terlanjur basi
+                                    # saat daemon akhirnya melihatnya (order
+                                    # terkirim menit-menit kemudian di tengah
+                                    # bar -> fill tak termodelkan). Bar yang
+                                    # tutupnya lebih tua dari batas ini
+                                    # DILEWATI demi paritas asumsi engine.
+                                    _max_age = int(getattr(config, "G4_MAX_SIGNAL_AGE_SECONDS", 120))
+                                    _bar_age = (datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+                                                - (latest_time + pd.Timedelta(minutes=5))).total_seconds()
+                                    if _bar_age > _max_age:
+                                        logger.warning(f"⏭️ [G4] Bar sinyal BASI dilewati: bar {latest_time} "
+                                                       f"tutup {int(_bar_age)} dtk lalu (batas {_max_age}s) — "
+                                                       f"kemungkinan koneksi putus/lambat; entry di tengah bar "
+                                                       f"tidak sesuai asumsi engine.")
+                                        journal.log("signal_skipped_stale", bar=str(latest_time),
+                                                    age_seconds=int(_bar_age), limit=_max_age)
+                                    else:
+                                        balance = bridge.get_account_balance()
+                                        spread_now = bridge.get_current_tick()
+                                        spread_usd_now = spread_now.get("spread", 0.0) * price_point
+                                        sig = strategy.evaluate(df5, df15, dfh1, balance,
+                                                                spread_usd=spread_usd_now)
+                                        if sig is not None:
+                                            _emit_and_send(sig, balance, spread_usd_now)
+                            else:
+                                logger.warning("⚠️ [G4] Riwayat M5/M15/H1 belum cukup "
+                                               "(butuh >=350 M5 / 20 M15 / 260 H1) — "
+                                               "sinyal dilewati siklus ini.")
+                    else:
+                        # ============================================================
+                        # [ICAS legacy] sinyal choch + sesi Asia/London (rollback)
+                        # ============================================================
+                        df_m5_raw = bridge.get_latest_m5_candles(count=150)
+                        if not df_m5_raw.empty and len(df_m5_raw) >= 15:
+                            df_m5 = calculate_session_killzones(df_m5_raw)
+                            latest_bar_idx = len(df_m5) - 2 # Latest completed candle
+                            latest_time = df_m5['time'].iloc[latest_bar_idx]
 
-                        if latest_time != last_scanned_bar_time:
-                            last_scanned_bar_time = latest_time
-                            balance = bridge.get_account_balance()
-                            spread_now = bridge.get_current_tick()
-                            spread_usd_now = spread_now.get("spread", 0.0) * price_point
-                            sig = strategy.evaluate_m5_setup(df_m5, latest_bar_idx, balance,
-                                                             spread_usd=spread_usd_now)
+                            if latest_time != last_scanned_bar_time:
+                                last_scanned_bar_time = latest_time
+                                balance = bridge.get_account_balance()
+                                spread_now = bridge.get_current_tick()
+                                spread_usd_now = spread_now.get("spread", 0.0) * price_point
+                                sig = strategy.evaluate_m5_setup(df_m5, latest_bar_idx, balance,
+                                                                 spread_usd=spread_usd_now)
 
-                            if sig is not None:
-                                logger.info(f"⚡ SINYAL TERDETEKSI: {sig.type} | Entry: {sig.entry_price:.2f} | SL: {sig.stop_loss:.2f} | TP1: {sig.tp1_price:.2f} | TP2: {sig.tp2_price:.2f} | TP3: {sig.tp3_price:.2f} | Lot: {sig.lot_size}")
-                                journal.log("signal_detected", type=sig.type,
-                                            entry=round(sig.entry_price, 4), sl=round(sig.stop_loss, 4),
-                                            tp1=round(sig.tp1_price, 4), tp2=round(sig.tp2_price, 4),
-                                            tp3=round(sig.tp3_price, 4), lot=sig.lot_size,
-                                            spread_usd=round(spread_usd_now, 4), balance=round(balance, 2))
-                                ticket = bridge.send_order(sig.type, sig.lot_size, sig.stop_loss, None)
-                                if ticket is not None:
-                                    strategy.daily_trades_count += 1
-                                    state_store.save_daily(today_str, strategy.daily_trades_count,
-                                                           strategy.consecutive_losses)   # [AUDIT FIX S-03]
-                                    merged_state_tickets.add(ticket)
-                                    adopted_logged.add(ticket)   # posisi baru sesi ini -> bukan adopsi
-                                    logger.info(f"✅ Order Berhasil Dieksekusi di MT5! Ticket: {ticket} (Trade Hari Ini: {strategy.daily_trades_count})")
-                                    # [F-17] harga fill NYATA + slippage terukur
-                                    _f = getattr(bridge, "last_fill", None) or {}
-                                    _fp = _f.get("price") or 0.0
-                                    _slip = None
-                                    if _fp:
-                                        _slip = round((_fp - sig.entry_price)
-                                                      if sig.type == "BUY"
-                                                      else (sig.entry_price - _fp), 4)
-                                        if abs(_slip) > 1.0:
-                                            logger.warning(f"⚠️ Slippage entry {_slip:+.2f} USD "
-                                                           f"({abs(_slip)*10:.0f} pips) — jauh di atas "
-                                                           f"asumsi config ${config.SLIPPAGE_USD:.2f}.")
-                                    journal.log("order_open", ticket=ticket, type=sig.type,
-                                                lot=sig.lot_size, entry=round(sig.entry_price, 4),
-                                                fill_price=round(_fp, 4) if _fp else None,
-                                                slippage_usd=_slip,
-                                                sl=round(sig.stop_loss, 4),
-                                                daily_count=strategy.daily_trades_count)
-                                else:
-                                    logger.warning("❌ Order GAGAL dieksekusi MT5 — lihat log bridge di atas.")
-                                    journal.log("order_failed", type=sig.type, lot=sig.lot_size,
-                                                entry=round(sig.entry_price, 4), sl=round(sig.stop_loss, 4))
+                                if sig is not None:
+                                    _emit_and_send(sig, balance, spread_usd_now)
 
             consecutive_cycle_errors = 0
           except KeyboardInterrupt:

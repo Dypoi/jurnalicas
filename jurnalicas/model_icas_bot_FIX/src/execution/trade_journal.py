@@ -29,6 +29,9 @@ Jenis event yang dicatat daemon:
   position_revived                  — [F-03] tiket "tutup" ternyata masih hidup
   position_closed                   — posisi tertutup saat daemon ON
   position_closed_offline           — posisi tertutup SAAT daemon OFF (rekonsiliasi)
+  position_closed_pnl_backfill      — [AUDIT 3 — A3-03] PnL penutupan yang gagal
+                                       diambil saat konfirmasi (riwayat deal flaky)
+                                       akhirnya berhasil direkonstruksi & ditulis
   feed_invalid / cycle_error        — [F-04/F-06] gangguan koneksi & ketahanan
 
 Analisis: python3 research/journal_report.py
@@ -49,12 +52,13 @@ class TradeJournal:
 
     def __init__(self, path: str = "logs/trade_journal.jsonl", enabled: bool = True,
                  engine_version: str = "unknown", max_bytes: int = 0,
-                 keep_rotated: int = 5):
+                 keep_rotated: int = 5, fsync: bool = True):
         self.path = path
         self.enabled = enabled
         self.engine_version = engine_version
         self.max_bytes = int(max_bytes or 0)
         self.keep_rotated = int(keep_rotated or 0)
+        self.fsync = bool(fsync)   # [A3-06] flush() saja tidak menjamin sampai disk
         self._lock = threading.Lock()
         # [F-08] telemetri kesehatan jurnal
         self.error_count = 0
@@ -99,6 +103,13 @@ class TradeJournal:
                 with open(self.path, "a", encoding="utf-8") as f:
                     f.write(line + "\n")
                     f.flush()
+                    if self.fsync:
+                        # [AUDIT FORENSIK 3 — A3-06] flush() hanya mendorong ke OS.
+                        # Saat power-loss / hard-crash, event TERAKHIR (justru
+                        # tp_hit / position_closed — yang paling berharga)
+                        # bisa hilang. fsync memaksa sampai disk (biaya ~ms,
+                        # frekuensi tulis jurnal jauh di bawah 1 event/detik).
+                        os.fsync(f.fileno())
             self.written_count += 1
             if self._degraded:                     # [F-08] pulih
                 self._degraded = False
