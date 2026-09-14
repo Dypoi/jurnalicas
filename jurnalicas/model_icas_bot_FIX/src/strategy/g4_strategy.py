@@ -39,19 +39,60 @@ PARITAS DENGAN ENGINE RISET — diverifikasi `research/g4_parity_check.py`
 from __future__ import annotations
 
 from typing import Optional, Tuple
+import time
+
 import pandas as pd
 
 from config import config
 from src.strategy.icas_strategy import IcasSignal
 
 
+def detect_server_offset_hours(tick_epoch_seconds, now_epoch_seconds=None) -> Optional[int]:
+    """[TZ-FIX 15 Sep 2026] Offset jam server MT5 terhadap UTC (dalam JAM),
+    dideteksi dari waktu tick live — bukan dari asumsi zona waktu statis.
+
+    LATAR (insiden 14-15 Sep): asumsi lama Europe/Athens (UTC+3 musim panas)
+    TIDAK berlaku untuk Exness — jam server Exness = GMT+0 sepanjang tahun
+    (FAQ resmi Exness; terverifikasi pula dari data broker sendiri: bar XAUUSD
+    terakhir tiap Jumat = 20:57-20:59 label server = jam tutup NY dalam UTC;
+    lihat TATA_CARA_G4.md). Akibat asumsi lama, semua candle live terbaca
+    3 jam lebih tua → guard usia bar (G4_MAX_SIGNAL_AGE_SECONDS) menolak
+    SEMUA entry sejak deploy 23:16 WIB 14 Sep, padahal feed benar-benar
+    segar (bar baru bermunculan tiap 5 menit dengan umur TEPAT 10800 dtk).
+
+    Dasar: mt5.symbol_info_tick().time adalah epoch "seolah-olah jam server
+    = UTC" — konvensi yang sama dengan kolom 'time' candle. Maka:
+        offset_jam = tick_epoch − epoch_utc_sekarang
+    Residual wajib < 300 dtk (umur tick ≤ 120 dtk + latensi) dan offset
+    wajib jam bulat dalam −12..+14. Gagal salah satu → None (pemanggil
+    fallback ke konversi lama). Panggil hanya dengan tick valid & reason
+    "ok" (bukan mode simulasi — tick simulasi memakai jam lokal mesin).
+    """
+    if not tick_epoch_seconds:
+        return None
+    now_e = time.time() if now_epoch_seconds is None else now_epoch_seconds
+    delta = float(tick_epoch_seconds) - float(now_e)
+    off = int(round(delta / 3600.0))
+    if abs(delta - off * 3600.0) > 300.0:
+        return None
+    if not (-12 <= off <= 14):
+        return None
+    return off
+
+
 def frames_from_raw(m5_raw: pd.DataFrame, m15_raw: pd.DataFrame, h1_raw: pd.DataFrame,
-                    server_tz="Europe/Athens") -> Optional[Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]]:
+                    server_tz="Europe/Athens", server_offset_hours=None) -> Optional[Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]]:
     """Ubah raw candle MT5 (kolom 'time' = waktu SERVER naive + OHLC) menjadi
     frame UTC ber-index DatetimeIndex yang BERAKHIR pada bar TERTUTUP terakhir.
 
-    Konversi server→UTC memakai zone Europe/Athens (EET/EEST, konvensi Exness —
-    sama dengan SERVER_TZ di research). Bar terakhir (masih berjalan) DIBUANG.
+    Konversi server→UTC: bila `server_offset_hours` (hasil
+    detect_server_offset_hours, dari waktu tick live) diberikan, dipakai offset
+    TETAP itu (label_server − offset = UTC) — jalur live daemon/dashboard
+    [TZ-FIX 15 Sep: Exness = GMT+0, bukan Athens]. None = konversi zone statis
+    Europe/Athens (jalur lama; dipertahankan untuk parity research — data
+    riset dikonversi dengan asumsi yang sama, dan logika G4 bersifat
+    sequence-invariant terhadap pergeseran label yang seragam).
+    Bar terakhir (masih berjalan) DIBUANG.
     Return None bila data kurang / tidak bisa dipakai.
     """
     try:
@@ -59,13 +100,18 @@ def frames_from_raw(m5_raw: pd.DataFrame, m15_raw: pd.DataFrame, h1_raw: pd.Data
     except Exception:
         return None
 
+    def _to_utc(idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
+        if server_offset_hours is not None:
+            return idx - pd.Timedelta(hours=server_offset_hours)
+        return idx.tz_localize(tz).tz_convert("UTC").tz_localize(None)
+
     def _prep(raw: pd.DataFrame) -> Optional[pd.DataFrame]:
         if raw is None or raw.empty or "time" not in raw.columns:
             return None
         df = raw.copy()
         idx = pd.DatetimeIndex(pd.to_datetime(df["time"]))
         try:
-            idx = idx.tz_localize(tz).tz_convert("UTC").tz_localize(None)
+            idx = _to_utc(idx)
         except Exception:
             return None
         df.index = idx

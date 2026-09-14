@@ -39,7 +39,7 @@ from config import config
 from src.execution.mt5_bridge import IcasMT5Bridge
 from src.execution.trade_journal import TradeJournal
 from src.strategy.icas_strategy import ModelIcasStrategy
-from src.strategy.g4_strategy import G4Strategy, frames_from_raw
+from src.strategy.g4_strategy import G4Strategy, frames_from_raw, detect_server_offset_hours
 from src.indicators.sessions import calculate_session_killzones, is_current_in_burst
 from src.state_store import StateStore
 
@@ -178,16 +178,18 @@ def _entry_blocked_same_bar_as_exit(last_flat_utc, now_utc=None) -> bool:
     return last_flat_utc >= bar_start
 
 
-def _m5_last_closed_age_seconds(bridge):
+def _m5_last_closed_age_seconds(bridge, server_offset_hours=None):
     """[OBSERVABILITY 15 Sep 2026] Umur (dtk) bar M5 TERTUTUP terakhir sebagaimana
     dilihat engine — semantik identik frames_from_raw: konversi waktu server
-    MT5 (Europe/Athens) -> UTC, lalu bar terakhir (berjalan) DIBUANG.
+    MT5 → UTC (offset live hasil detect_server_offset_hours; None = fallback
+    Europe/Athens), lalu bar terakhir (berjalan) DIBUANG.
 
     Latar: kejadian 15 Sep 01:20 WIB — tick hidup sehingga heartbeat bilang
     "Feed: OK", tapi riwayat candle terminal tertinggal 3 jam (bar 15:15 UTC
     baru terlihat daemon pada 18:20 UTC, umur 10.800 dtk) sehingga SEMUA bar
-    baru dibuang guard basi dan bot tak bisa entry. Field heartbeat "Feed"
-    hanya membaca tick dan tidak bisa melihat kondisi ini.
+    baru dibuang guard basi dan bot tak bisa entry. (Diagnosis revisi
+    15 Sep siang: angka "tepat 3 jam" di SEMUA kejadian + bar baru tiap
+    5 menit = offset jam server GMT+0 vs asumsi Athens, BUKAN candle macet.)
 
     Independen dari cabang sinyal (jalan juga saat posisi terbuka / mode
     ICAS). Return None bila candle belum tersedia (terminal belum sync).
@@ -197,8 +199,11 @@ def _m5_last_closed_age_seconds(bridge):
         if raw is None or len(raw) < 2 or "time" not in raw.columns:
             return None
         idx = pd.DatetimeIndex(pd.to_datetime(raw["time"]))
-        tz = pd.Timestamp("2026-01-01", tz="Europe/Athens").tz
-        idx = idx.tz_localize(tz).tz_convert("UTC").tz_localize(None)
+        if server_offset_hours is not None:
+            idx = idx - pd.Timedelta(hours=server_offset_hours)
+        else:
+            tz = pd.Timestamp("2026-01-01", tz="Europe/Athens").tz
+            idx = idx.tz_localize(tz).tz_convert("UTC").tz_localize(None)
         idx = idx.sort_values()
         last_closed_open = idx[-2]  # bar terakhir = berjalan, dibuang (spt engine)
         now_u = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
@@ -420,6 +425,11 @@ def main():
         logger.info("Bot aktif dalam mode 24 JAM FULL MARKET. Memantau seluruh sesi secara kontinu...")
 
     last_scanned_bar_time = None
+    # [TZ-FIX 15 Sep] offset jam server MT5 vs UTC (jam), dideteksi dari waktu
+    # tick live (Exness = GMT+0; asumsi lama Europe/Athens salah 3 jam -> semua
+    # bar terbaca basi & guard memblokir semua entry sejak 23:16 WIB 14 Sep).
+    srv_offset_h = None
+    _srv_offset_checked_at = 0.0
     # [PARITAS strict_bar_open_entry — 14 Sep 2026] waktu (UTC) posisi terakhir
     # dikonfirmasi FLAT; entry baru diblok bila masih dalam bar M5 yang sama.
     last_flat_utc = None
@@ -532,12 +542,34 @@ def main():
             if now_time - last_heartbeat_time >= 60:
                 last_heartbeat_time = now_time
                 tick = bridge.get_current_tick()
+                # [TZ-FIX 15 Sep] deteksi offset jam server dari waktu TICK live
+                # (bukan asumsi zone): Exness = GMT+0, bukan Europe/Athens.
+                # Re-detect maks 1x/jam (pergantian DST/server); gagal -> retry
+                # siklus berikut; None -> fallback konversi lama (arah aman:
+                # guard usia bar akan memblokir, bukan membiarkan).
+                if (tick.get("valid") and tick.get("reason") == "ok"
+                        and now_time - _srv_offset_checked_at >= 3600.0):
+                    _off = detect_server_offset_hours(tick.get("time"))
+                    if _off is not None:
+                        _srv_offset_checked_at = now_time
+                        if _off != srv_offset_h:
+                            _old_off = srv_offset_h
+                            srv_offset_h = _off
+                            if _old_off is None:
+                                logger.info(f"🕐 [TZ-FIX] Jam server MT5 terdeteksi UTC{_off:+d} — konversi candle "
+                                            f"memakai offset live ini. (Asumsi lama Europe/Athens UTC+3 salah utk "
+                                            f"Exness GMT+0 — bar terbaca 3 jam lebih tua & semua entry diblok guard.)")
+                            else:
+                                logger.warning(f"🕐 [TZ-FIX] Offset jam server BERUBAH: UTC{_old_off:+d} → "
+                                               f"UTC{_off:+d} — konversi candle diperbarui.")
+                            journal.log("server_clock_offset", offset_hours=_off,
+                                        previous=(_old_off if _old_off is not None else "athens_assumption"))
                 has_pos = bridge.has_open_positions()
                 _jh = journal.health()
                 # [OBSERVABILITY 15 Sep] umur bar M5 tertutup terakhir — "Feed: OK"
                 # hanya membaca TICK; tick hidup + candle macet 3 jam tetap tampil
                 # "OK" (kejadian 15 Sep 01:20 WIB) padahal semua entry diblok guard.
-                _m5_age = _m5_last_closed_age_seconds(bridge)
+                _m5_age = _m5_last_closed_age_seconds(bridge, srv_offset_h)
                 _m5_disp = _fmt_m5_age(_m5_age)
                 if (_m5_age is not None
                         and _m5_age > int(getattr(config, "HEARTBEAT_CANDLE_STALE_SECONDS", 900))
@@ -972,7 +1004,8 @@ def main():
                         frames = frames_from_raw(
                             bridge.get_latest_candles("M5", 1500),
                             bridge.get_latest_candles("M15", 1000),
-                            bridge.get_latest_candles("H1", 5000))
+                            bridge.get_latest_candles("H1", 5000),
+                            server_offset_hours=srv_offset_h)  # [TZ-FIX 15 Sep] offset live
                         if frames is not None:
                             df5, df15, dfh1 = frames
                             if (len(df5) >= 350 and len(df15) >= 20

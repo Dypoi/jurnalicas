@@ -25,7 +25,7 @@ from config import config
 from src.indicators.sessions import calculate_session_killzones, is_current_in_burst
 from src.execution.mt5_bridge import IcasMT5Bridge
 from src.backtest.engine import IcasBacktestEngine
-from src.strategy.g4_strategy import frames_from_raw, g4_cascade_detail
+from src.strategy.g4_strategy import frames_from_raw, g4_cascade_detail, detect_server_offset_hours
 
 app = Flask(__name__, template_folder='../templates')
 
@@ -675,10 +675,15 @@ def api_g4_state():
     spread_usd_now = round(tick["spread"] * price_point, 2)
     max_spread_usd = float(getattr(config, "MAX_SPREAD_USD", 0.0) or 0.0)
 
+    # [TZ-FIX 15 Sep] offset jam server live (Exness = GMT+0, bukan Athens) —
+    # sama seperti daemon, agar bar yang dinilai dashboard = bar yang dinilai engine.
+    _srv_off = (detect_server_offset_hours(tick.get("time"))
+                if (tick.get("valid") and tick.get("reason") == "ok") else None)
     frames = frames_from_raw(
         bridge.get_latest_candles("M5", 400),
         bridge.get_latest_candles("M15", 120),
-        bridge.get_latest_candles("H1", 3000))
+        bridge.get_latest_candles("H1", 3000),
+        server_offset_hours=_srv_off)
     det = None
     blockers = []
     if frames is None:
