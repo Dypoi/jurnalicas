@@ -46,7 +46,7 @@ def main():
     print("="*85)
     print(f"• Mode Sesi : {kz_label}")
     print(f"• Pair      : {config.SYMBOL} (M5) | Risk: {config.RISK_PER_TRADE_PCT*100:.1f}% | Early BE+: +{config.EARLY_BE_TRIGGER_PIPS}p | SL: {config.STOP_LOSS_PIPS}p")
-    print(f"• Target    : TP1: +{config.TP1_PIPS}p (1:1) | TP2: +{config.TP2_PIPS}p (1:2) | TP3: +{config.TP3_PIPS}p (1:3 -> SL to TP1) | Runner: Step {config.TRAILING_STEP_PIPS}p")
+    print(f"• Target    : TP1: +{config.TP1_PIPS}p ({config.TP1_PIPS/config.STOP_LOSS_PIPS:.2f}xSL) | TP2: +{config.TP2_PIPS}p ({config.TP2_PIPS/config.STOP_LOSS_PIPS:.2f}xSL) | TP3: +{config.TP3_PIPS}p ({config.TP3_PIPS/config.STOP_LOSS_PIPS:.2f}xSL -> SL to TP1) | Runner: Step {config.TRAILING_STEP_PIPS}p")
     print("="*85 + "\n")
 
     csv_path = "data/historical/xauusd_m5.csv"
@@ -100,10 +100,10 @@ def main():
     print(f"• Net Profit ($)           : ${net_profit:+,.2f} ({roi:+,.2f}%)")
     print(f"• Saldo Akhir Modal        : ${final_cap:,.2f}")
     print(f"• Maximum Drawdown         : {dd:.2f}%")
-    print(f"• TP1 Executed (1:1 / +20p): {len(tdf[tdf['tp1_hit'] == True])} kali ({len(tdf[tdf['tp1_hit'] == True])/total*100:.1f}%)")
-    print(f"• TP2 Executed (1:2 / +40p): {len(tdf[tdf['tp2_hit'] == True])} kali ({len(tdf[tdf['tp2_hit'] == True])/total*100:.1f}%)")
-    print(f"• TP3 Executed (1:3 / +60p): {len(tdf[tdf['tp3_hit'] == True])} kali ({len(tdf[tdf['tp3_hit'] == True])/total*100:.1f}%) -> SL pindah ke TP1 (+20p)")
-    print(f"• Trailing Runner Stepped  : {len(tdf[tdf['trail_stepped'] >= 1])} kali (>=100 pips)")
+    print(f"• TP1 Executed ({config.TP1_PIPS/config.STOP_LOSS_PIPS:.2f}xSL / +{config.TP1_PIPS:.1f}p): {len(tdf[tdf['tp1_hit'] == True])} kali ({len(tdf[tdf['tp1_hit'] == True])/total*100:.1f}%)")
+    print(f"• TP2 Executed ({config.TP2_PIPS/config.STOP_LOSS_PIPS:.2f}xSL / +{config.TP2_PIPS:.1f}p): {len(tdf[tdf['tp2_hit'] == True])} kali ({len(tdf[tdf['tp2_hit'] == True])/total*100:.1f}%)")
+    print(f"• TP3 Executed ({config.TP3_PIPS/config.STOP_LOSS_PIPS:.2f}xSL / +{config.TP3_PIPS:.1f}p): {len(tdf[tdf['tp3_hit'] == True])} kali ({len(tdf[tdf['tp3_hit'] == True])/total*100:.1f}%) -> SL pindah ke TP1 (+{config.TP1_PIPS:.1f}p)")
+    print(f"• Trailing Runner Stepped  : {len(tdf[tdf['trail_stepped'] >= 1])} kali (>={config.TRAILING_STEP_PIPS:.0f} pips)")
     print("-" * 75)
 
     print("\n📅 Rincian Bulan per Bulan (Month-by-Month):")

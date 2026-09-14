@@ -27,6 +27,7 @@ posisi baru.
 """
 import json
 import os
+import time
 import threading
 import datetime
 from typing import Dict, Any, Optional
@@ -75,8 +76,22 @@ class StateStore:
             f.write(payload)
             f.flush()
             os.fsync(f.fileno())          # [F-14] tahan terhadap mati listrik
-        os.replace(tmp_path, self.path)   # atomik di POSIX & Windows (Py>=3.3)
-        self._last_serialized = payload
+        # [AUDIT FORENSIK 3 — A3-05] Di Windows, os.replace bisa gagal
+        # PermissionError sesaat bila proses lain (dashboard / editor / AV)
+        # sedang membuka file tujuan. Tanpa retry, kegagalan ini melempar
+        # exception ke daemon -> cycle_error -> state TIDAK tersimpan ->
+        # bila crash setelahnya, flag TP hilang -> risiko TP1 dobel bangkit
+        # kembali. Retry 3x (50/100/150ms) menutup jendela race praktis seluruhnya.
+        last_err: Optional[BaseException] = None
+        for attempt in range(3):
+            try:
+                os.replace(tmp_path, self.path)   # atomik di POSIX & Windows (Py>=3.3)
+                self._last_serialized = payload
+                return
+            except OSError as e:
+                last_err = e
+                time.sleep(0.05 * (attempt + 1))
+        raise last_err  # type: ignore[misc]
 
     # ------------------------- positions -------------------------
     def save_position(self, pos: Dict[str, Any]) -> None:

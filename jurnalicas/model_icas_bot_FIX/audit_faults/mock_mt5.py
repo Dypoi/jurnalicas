@@ -16,8 +16,17 @@ Mode kegagalan yang didukung (set via mock.faults):
                            dieksekusi server (koneksi putus tepat sesudah kirim)
   send_retcode          -> order_send() mengembalikan retcode tertentu
   account_none          -> account_info() mengembalikan None
+  [AUDIT 3]
+  rates_none            -> copy_rates_from_pos() mengembalikan None (candle live
+                           gagal — dulu memicu fallback CSV basi, bug A3-01)
+  history_success_budget-> bila int: N panggilan history_deals_get pertama
+                           berhasil, sisanya raise — mensimulasikan riwayat yang
+                           flaky tepat saat PnL penutupan hendak dibaca (A3-03)
 
 Semua state pasar bisa disetel: mock.bid / mock.ask / mock.positions / mock.deals
+Candle M5 live dihasilkan datar di sekitar mock.bid (pola tenang — tidak
+menghasilkan sinyal) sehingga jalur copy_rates_from_pos live benar-benar
+dijalankan oleh harness, bukan fallback CSV.
 """
 import time
 import types
@@ -54,6 +63,9 @@ class Faults:
         self.send_retcode = None          # None = normal (10009)
         self.account_none = False
         self.send_drop_next = 0           # N order_send berikutnya "hilang"
+        # [AUDIT 3]
+        self.rates_none = False           # candle live gagal (uji A3-01)
+        self.history_success_budget = None  # None = tak terbatas (uji A3-03)
 
 
 def build(symbol="XAUUSDm", point=0.01, digits=2):
@@ -148,6 +160,12 @@ def build(symbol="XAUUSDm", point=0.01, digits=2):
             raise RuntimeError("IPC fault: history_deals_get failed")
         if m.faults.history_none:
             return None
+        # [AUDIT 3 — A3-03] riwayat "setengah hidup": N panggilan pertama OK,
+        # sisanya raise — memodelkan history yang flaky tepat setelah koneksi pulih.
+        if m.faults.history_success_budget is not None:
+            if m.faults.history_success_budget <= 0:
+                raise RuntimeError("IPC fault: history budget habis (flaky)")
+            m.faults.history_success_budget -= 1
         return tuple(m.deals)
 
     def account_info():
@@ -159,7 +177,21 @@ def build(symbol="XAUUSDm", point=0.01, digits=2):
                        margin=0.0, margin_free=m.equity, margin_level=0.0)
 
     def copy_rates_from_pos(sym, tf, start, count):
-        return None
+        """[AUDIT 3] Candle M5 live. Default: bar datar di sekitar mock.bid
+        (pola tenang, TIDAK menghasilkan sinyal — jalur candle live benar-benar
+        dieksekusi). Set faults.rates_none=True utk mensimulasikan kegagalan
+        ambil candle (terminal belum sync / koneksi goyah)."""
+        if m.faults.rates_none:
+            return None
+        n = max(1, int(count or 1))
+        now_slot = int(time.time() // 300) * 300
+        bars = []
+        for k in range(n):
+            t = now_slot - (n - 1 - k) * 300
+            px = round(m.bid, 2)
+            bars.append({"time": t, "open": px, "high": px, "low": px, "close": px,
+                         "tick_volume": 10, "spread": 26, "real_volume": 0})
+        return bars
 
     def _open_position(order_type, volume, price, sl, tp, magic, comment):
         tk = m._next_ticket

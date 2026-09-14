@@ -1,0 +1,10 @@
+================================================================================================
+ 🎲 MONTE-CARLO MULTI-SEED | 2025-09-01 .. 2026-09-01 | risk $100 | 32 seed acak | eksekusi M5
+================================================================================================
+ Kandidat                                     |   Tr |     PF |      Net $ |     Acak net μ (min..maks) | PF acak μ |  p-value | Vonis
+----------------------------------------------------------------------------------------------------------------------------------
+ G4 — W24h + trail cepat 50/30 (TP plan)      | 1338 |   1.12 |     +4,493 |      -508 (  -4,235..  +3,591) |      0.98 |    0.000 | SIGNIFIKAN
+ G6 — W24h + SMA200-harian (TP plan)          |  547 |   1.21 |     +4,585 |      -401 (  -3,394..  +2,685) |      0.97 |    0.000 | SIGNIFIKAN
+
+p-value = fraksi seed acak dengan net >= kandidat (empiris, satu sisi).
+Catatan: p-value berlaku utk periode & geometri ini saja; tetap bukan jaminan

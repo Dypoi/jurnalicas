@@ -5,6 +5,7 @@ BE+ Trigger at +10 pips, Re-Entry enabled after BE+, and Separate WIN / LOSS / B
 
 import pandas as pd
 import numpy as np
+from config import config
 from src.indicators.sessions import calculate_session_killzones
 
 df_m5_raw = pd.read_csv('data/historical/xauusd_m5.csv')
@@ -330,10 +331,10 @@ def print_detailed_metrics(title, df, final_cap, initial=10000.0):
     print(f"• Net Profit ($)           : ${net_pnl:+,.2f} ({roi:+,.2f}%)")
     print(f"• Saldo Akhir Modal        : ${final_cap:,.2f}")
     print(f"• Maximum Drawdown         : {dd:.2f}%")
-    print(f"• TP1 Executed (1:1 / +20p): {len(df[df['tp1_hit'] == True])} kali ({len(df[df['tp1_hit'] == True])/total*100:.1f}%)")
-    print(f"• TP2 Executed (1:2 / +40p): {len(df[df['tp2_hit'] == True])} kali ({len(df[df['tp2_hit'] == True])/total*100:.1f}%)")
-    print(f"• TP3 Executed (1:3 / +60p): {len(df[df['tp3_hit'] == True])} kali ({len(df[df['tp3_hit'] == True])/total*100:.1f}%) -> SL otomatis naik ke TP1 (+20p)")
-    print(f"• Trailing Runner Stepped  : {len(df[df['trail_stepped'] >= 1])} kali (>=100 pips)")
+    print(f"• TP1 Executed (+{config.TP1_PIPS:.1f}p): {len(df[df['tp1_hit'] == True])} kali ({len(df[df['tp1_hit'] == True])/total*100:.1f}%)")
+    print(f"• TP2 Executed (+{config.TP2_PIPS:.1f}p): {len(df[df['tp2_hit'] == True])} kali ({len(df[df['tp2_hit'] == True])/total*100:.1f}%)")
+    print(f"• TP3 Executed (+{config.TP3_PIPS:.1f}p): {len(df[df['tp3_hit'] == True])} kali ({len(df[df['tp3_hit'] == True])/total*100:.1f}%) -> SL otomatis naik ke TP1 (+{config.TP1_PIPS:.1f}p)")
+    print(f"• Trailing Runner Stepped  : {len(df[df['trail_stepped'] >= 1])} kali (>={config.TRAILING_STEP_PIPS:.0f} pips)")
     
     print("\n📅 Rincian Bulan per Bulan (Month-by-Month):")
     months = sorted(df['month'].unique())

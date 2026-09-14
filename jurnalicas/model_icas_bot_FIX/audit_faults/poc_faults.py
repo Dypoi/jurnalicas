@@ -9,6 +9,14 @@ Dijalankan SEBELUM fix untuk membuktikan tiap bug, lalu SESUDAH fix sebagai
 regression test.  Gunakan:
     python3 audit_faults/poc_faults.py            # semua skenario
     python3 audit_faults/poc_faults.py 3 4        # skenario tertentu
+
+[AUDIT FORENSIK 3 — 08 Sep 2026] skenario baru:
+  S-12  candle live gagal -> sinyal TIDAK boleh dievaluasi dari CSV statis basi
+        (fallback CSV basi = sinyal dari pasar 2 bulan lalu -> order live ngawur)
+  S-13  restart saat terminal belum sync -> tiket tertunda WAJIB menahan mutex
+        entry (tanpa ini: posisi kedua terbuka = dobel posisi + margin dobel)
+  S-14  PnL penutupan yang gagal dibaca (riwayat flaky) -> backfill otomatis
+        ke jurnal (tanpa ini: PF/net dashboard diam-diam salah)
 """
 import sys
 import os
@@ -696,6 +704,257 @@ def scen_11_mutex_holds_while_pending():
 
 
 # ============================================================================ #
+# S-12  [AUDIT 3 — A3-01] Candle live gagal -> fallback CSV basi -> sinyal ngawur
+# ============================================================================ #
+def _run_s12(rates_none):
+    """Jalankan daemon 3 siklus dengan sinyal DIPAKSA ada.
+    Return (jumlah send_order, jumlah order_open, jumlah posisi di broker)."""
+    mock = mock_mt5.build()
+    mock.bid, mock.ask = 4620.00, 4620.26
+    with tempfile.TemporaryDirectory() as tmp:
+        cfgmod, br, icas_daemon = _load_fresh(mock, tmp)
+        attempts = []
+        real_send = br.IcasMT5Bridge.send_order
+
+        def spy_send(self, *a, **kw):
+            attempts.append(a)
+            return real_send(self, *a, **kw)
+
+        br.IcasMT5Bridge.send_order = spy_send
+
+        # PAKSA sinyal selalu ada — bila candle tersedia, order PASTI dicoba.
+        from src.strategy.icas_strategy import ModelIcasStrategy, IcasSignal
+        real_eval = ModelIcasStrategy.evaluate_m5_setup
+
+        def always_signal(self, df, idx, bal, spread_usd=0.0):
+            return IcasSignal(type="BUY", entry_price=4620.0, stop_loss=4605.0,
+                              early_be_price=0.0, tp1_price=4638.75, tp2_price=4657.5,
+                              tp3_price=4676.25, lot_size=0.33, risk_amount=500.0,
+                              reason="forced by S-12")
+
+        ModelIcasStrategy.evaluate_m5_setup = always_signal
+
+        mock.faults.rates_none = rates_none
+        err, _ = _run_daemon(icas_daemon, cycles=3)
+
+        br.IcasMT5Bridge.send_order = real_send
+        ModelIcasStrategy.evaluate_m5_setup = real_eval
+        evs = _read_journal(cfgmod.config.JOURNAL_FILE)
+        n_open = len([e for e in evs if e.get("event") == "order_open"])
+        return len(attempts), n_open, len(mock.positions)
+
+
+def scen_12_stale_csv_fallback_guard():
+    print("\n[S-12] DATA: candle live gagal (terminal belum sync) -> TIDAK boleh "
+          "pakai CSV statis repo sebagai sumber sinyal")
+    a_ctrl, o_ctrl, p_ctrl = _run_s12(rates_none=False)   # kontrol: candle hidup
+    a_fix, o_fix, p_fix = _run_s12(rates_none=True)       # uji   : candle mati
+    record("S-12", "KONTROL: candle hidup -> sinyal terpaksa memang jadi order "
+                   "(bukti jalur scan live)",
+           a_ctrl >= 1 and o_ctrl >= 1 and p_ctrl >= 1,
+           f"kontrol -> send_order={a_ctrl}x order_open={o_ctrl} posisi={p_ctrl}")
+    record("S-12", "candle live gagal -> sinyal DILEWATI (bukan dievaluasi dari "
+                   "CSV basi 2026-07-13)",
+           a_fix == 0 and o_fix == 0 and p_fix == 0,
+           f"fixed -> send_order={a_fix}x order_open={o_fix} posisi={p_fix}")
+
+
+# ============================================================================ #
+# S-13  [AUDIT 3 — A3-02] Restart saat koneksi belum sehat -> tiket tertunda
+#       TIDAK memegang mutex -> posisi kedua terbuka (dobel posisi!)
+# ============================================================================ #
+def _run_s13(with_state):
+    """Restart daemon: posisi lama masih hidup di broker tetapi terminal belum
+    sinkron (positions_get -> () dan tick masih segar). Return (send_order,
+    order_open, posisi di broker)."""
+    mock = mock_mt5.build()
+    mock.bid, mock.ask = 4620.00, 4620.26
+    # posisi lama MASIH TERBUKA di broker
+    mock.positions = [mock_mt5.Position(ticket=7012, type=0, volume=0.33,
+                                        price_open=4600.0, sl=4585.0, tp=0.0,
+                                        profit=0.0, magic=777404)]
+    with tempfile.TemporaryDirectory() as tmp:
+        cfgmod, br, icas_daemon = _load_fresh(mock, tmp)
+        if with_state:
+            from src.state_store import StateStore
+            st = StateStore(cfgmod.config.STATE_FILE)
+            st.save_position({"ticket": 7012, "type": "BUY", "volume": 0.33,
+                              "initial_volume": 0.33, "price_open": 4600.0,
+                              "tp1_hit": True, "tp2_hit": False, "tp3_hit": False,
+                              "be_set": True, "max_fav": 20.0, "trail_step": 1})
+            del st
+
+        attempts = []
+        real_send = br.IcasMT5Bridge.send_order
+
+        def spy_send(self, *a, **kw):
+            attempts.append(a)
+            return real_send(self, *a, **kw)
+
+        br.IcasMT5Bridge.send_order = spy_send
+
+        from src.strategy.icas_strategy import ModelIcasStrategy, IcasSignal
+        real_eval = ModelIcasStrategy.evaluate_m5_setup
+
+        def always_signal(self, df, idx, bal, spread_usd=0.0):
+            return IcasSignal(type="BUY", entry_price=4620.0, stop_loss=4605.0,
+                              early_be_price=0.0, tp1_price=4638.75, tp2_price=4657.5,
+                              tp3_price=4676.25, lot_size=0.33, risk_amount=500.0,
+                              reason="forced by S-13")
+
+        ModelIcasStrategy.evaluate_m5_setup = always_signal
+
+        # STARTUP: terminal belum sehat (account_info None) & daftar posisi
+        # belum sync. Keduanya HARUS aktif sejak SEBELUM main() agar siklus
+        # pertama pun sudah tidak melihat posisi lama — persis kondisi user
+        # menyalakan MT5 + bot bersamaan (posisi belum masuk daftar terminal).
+        mock.faults.account_none = True
+        mock.faults.positions_empty = True
+        box = {"n": 0}
+        real_sleep = time.sleep
+
+        def fake_sleep(s):
+            if s != POLL_SENTINEL:
+                real_sleep(0)
+                return
+            box["n"] += 1
+            mock.faults.reset()
+            mock.faults.positions_empty = True      # daftar posisi belum sync
+            if box["n"] > 3:
+                raise _Stop()
+            real_sleep(0)
+
+        orig = icas_daemon.time.sleep
+        icas_daemon.time.sleep = fake_sleep
+        try:
+            icas_daemon.main()
+        except _Stop:
+            pass
+        except BaseException as e:
+            print("   (daemon exception:", type(e).__name__, e, ")")
+        finally:
+            icas_daemon.time.sleep = orig
+            br.IcasMT5Bridge.send_order = real_send
+            ModelIcasStrategy.evaluate_m5_setup = real_eval
+
+        evs = _read_journal(cfgmod.config.JOURNAL_FILE)
+        n_open = len([e for e in evs if e.get("event") == "order_open"])
+        return len(attempts), n_open, len(mock.positions)
+
+
+def scen_13_restart_deferred_mutex():
+    print("\n[S-13] MUTEX: restart saat terminal belum sync -> tiket tertunda "
+          "harus menahan entry (anti posisi ganda)")
+    a_ctrl, o_ctrl, p_ctrl = _run_s13(with_state=False)   # kontrol: tanpa state
+    a_fix, o_fix, p_fix = _run_s13(with_state=True)       # uji: state ada
+    record("S-13", "KONTROL: tanpa state tersimpan, order memang lolos "
+                   "(bukti jalur entry hidup, uji tidak kosong)",
+           a_ctrl >= 1 and o_ctrl >= 1 and p_ctrl >= 2,
+           f"kontrol -> send_order={a_ctrl}x order_open={o_ctrl} "
+           f"posisi={p_ctrl} (posisi lama + baru = dobel!)")
+    record("S-13", "dengan tiket tertunda, entry baru DITAHAN sampai penutupan "
+                   "terbukti / katup pengaman",
+           a_fix == 0 and o_fix == 0,
+           f"fixed -> send_order={a_fix}x order_open={o_fix}")
+    record("S-13", "tidak ada posisi kedua di broker",
+           p_fix == 1, f"posisi di broker = {p_fix} (harus 1: hanya posisi lama)")
+
+
+# ============================================================================ #
+# S-14  [AUDIT 3 — A3-03] PnL penutupan gagal dibaca saat koneksi flaky
+#       -> jurnal "bolong" -> HARUS di-backfill otomatis
+# ============================================================================ #
+def scen_14_pnl_backfill():
+    print("\n[S-14] JURNAL: PnL penutupan tak terbaca (riwayat flaky) -> backfill otomatis")
+    mock = mock_mt5.build()
+    mock.bid, mock.ask = 4620.00, 4620.26
+    ENTRY, SL, LOT = 4600.00, 4585.00, 0.33
+    with tempfile.TemporaryDirectory() as tmp:
+        cfgmod, br, icas_daemon = _load_fresh(
+            mock, tmp, cfg_overrides={"JOURNAL_PNL_BACKFILL_INTERVAL_SECONDS": 0})
+        mock.positions = [mock_mt5.Position(ticket=7014, type=0, volume=LOT,
+                                            price_open=ENTRY, sl=SL, tp=0.0,
+                                            profit=0.0, magic=777404)]
+        mock.deals = [mock_mt5.Deal(ticket=1, position_id=7014, type=0, entry=0,
+                                    volume=LOT, price=ENTRY, profit=0.0, commission=0.0,
+                                    swap=0.0, time=int(time.time()), symbol=mock.symbol_name,
+                                    comment="Model Icas Scalper")]
+
+        def close_rest(price):
+            """Broker menutup SISA posisi (SL) — deal OUT kedua."""
+            mock.deals.append(mock_mt5.Deal(
+                ticket=9_100_000_000, position_id=7014, type=1,
+                entry=mock.DEAL_ENTRY_OUT, volume=0.23, price=price,
+                profit=round((price - ENTRY) * 0.23 * 100.0, 2),
+                commission=0.0, swap=0.0, time=int(time.time()),
+                symbol=mock.symbol_name, comment="sl 4590.00"))
+            mock.positions = []
+
+        def apply_step(i):
+            mock.faults.reset()
+            if i == 0:                                   # TP1 (+200 pips)
+                mock.bid, mock.ask = 4620.00, 4620.26
+            elif i == 1:
+                close_rest(4590.00)                      # SL menyentuh 4590
+                mock.bid, mock.ask = 4590.00, 4590.26
+            elif i == 5:
+                # miss ke-5 -> gerbang bukti. Budget=1: pembacaan volume BERHASIL
+                # (bukti lunas) tetapi pembacaan PnL sesudahnya GAGAL — persis
+                # riwayat yang flaky tepat setelah koneksi pulih.
+                mock.faults.history_success_budget = 1
+
+        N = 10
+        box = {"n": 0}
+        real_sleep = time.sleep
+
+        def fake_sleep(s):
+            if s != POLL_SENTINEL:
+                real_sleep(0)
+                return
+            i = box["n"]
+            box["n"] += 1
+            if i < N:
+                apply_step(i)
+            else:
+                mock.faults.reset()
+            if box["n"] > N:
+                raise _Stop()
+            real_sleep(0)
+
+        orig = icas_daemon.time.sleep
+        icas_daemon.time.sleep = fake_sleep
+        try:
+            icas_daemon.main()
+        except _Stop:
+            pass
+        except BaseException as e:
+            print("   (daemon exception:", type(e).__name__, e, ")")
+        finally:
+            icas_daemon.time.sleep = orig
+
+        evs = _read_journal(cfgmod.config.JOURNAL_FILE)
+        closes = [e for e in evs if e.get("event") in ("position_closed", "position_closed_offline")
+                  and str(e.get("ticket")) == "7014"]
+        closes_no_pnl = [e for e in closes if not isinstance(e.get("realized_total"), (int, float))]
+        backfills = [e for e in evs if e.get("event") == "position_closed_pnl_backfill"
+                     and str(e.get("ticket")) == "7014"]
+        missing = [e for e in evs if e.get("event") == "position_closed_pnl_missing"]
+        tp1 = [e for e in evs if e.get("event") == "tp_hit" and e.get("level") == 1]
+
+        record("S-14", "TP1 tetap tereksekusi tepat satu kali",
+               len(tp1) == 1, f"tp_hit L1 = {len(tp1)}")
+        record("S-14", "penutupan tercatat TEPAT sekali (tanpa PnL karena riwayat flaky)",
+               len(closes) == 1 and len(closes_no_pnl) == 1,
+               f"close event = {len(closes)}, tanpa realized_total = {len(closes_no_pnl)}")
+        record("S-14", "PnL BERHASIL di-backfill otomatis (realized ≈ -30.00: "
+                       "+200 TP1 lalu -230 sisa)",
+               len(backfills) == 1 and abs(float(backfills[0].get("realized_total", 1e9)) + 30.0) < 0.02,
+               f"backfill = {[e.get('realized_total') for e in backfills]}")
+        record("S-14", "tidak ada event 'PnL missing permanen'",
+               len(missing) == 0, f"position_closed_pnl_missing = {len(missing)}")
+
+
+# ============================================================================ #
 def main():
     scens = {1: scen_1_startup_crash_on_read_error,
              2: scen_2_startup_false_offline_close,
@@ -707,7 +966,10 @@ def main():
              8: scen_8_journal_write_failure,
              9: scen_9_orphan_close_event,
              10: scen_10_full_lifecycle_with_outage,
-             11: scen_11_mutex_holds_while_pending}
+             11: scen_11_mutex_holds_while_pending,
+             12: scen_12_stale_csv_fallback_guard,
+             13: scen_13_restart_deferred_mutex,
+             14: scen_14_pnl_backfill}
     only = [int(a) for a in sys.argv[1:]] or list(scens)
     import logging
     logging.disable(logging.CRITICAL)

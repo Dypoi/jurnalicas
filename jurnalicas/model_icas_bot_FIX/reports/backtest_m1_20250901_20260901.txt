@@ -1,0 +1,114 @@
+====================================================================================================
+ BACKTEST ENGINE AUDIT M1 BID/ASK — PERIODE 2025-09-01 s/d 2026-09-01
+====================================================================================================
+File data     : 2 file XAUUSD_M1 (warm-up dari 2025-08-11)
+Bar M1/M5     : 376,338 / 71,128   | hari bursa M5: 313
+Harga         : 3,436.55 .. 5,596.81
+Spread bar    : median $0.67 | p95 $1.07 | maks $9.95
+Strategi      : A - PLAN SAAT INI (config.py) — SL 150p | TP 187.5/375.0/562p | split 30%/25%/25%/runner | trail 100/30p | BE+ OFF | killzone OFF
+Modal / risiko: $10,000 / $500 per trade (fixed, non-compounding)
+Engine        : anti-repaint, pesimis (SL dulu intrabar), spread riil bid/ask implisit; slippage & komisi TIDAK dimodelkan
+Guard spread  : $0.35 -> 0.36% bar M5 lolos  ⚠️ HAMIR SEMUA BAR DIBLOKIR
+Guard spread  : $1.20 -> 96.47% bar M5 lolos
+
+>>> PLAN SAAT INI — guard $0.35 | risk $500
+    Trades        : 7  (3W / 0BE / 4L)
+    Win Rate      : 42.86%   | Non-Loss Rate: 42.86%
+    Profit Factor : 0.72
+    Net PnL       : $-558.53  (ROI -5.59%)
+    Ekspektasi    : $-79.79/trade
+    AvgWin/AvgLoss: $+473.82 / $-495.00
+    Max Drawdown  : 14.85%  ($1,485.00)
+    Ekuitas akhir : $9,441.47 dari $10,000
+    Tr/hari bursa : 0.02  | tr/hari aktif: 1.0
+    TP1/TP2/TP3   : 28.6% / 14.3% / 0.0%  | trailing aktif: 42.9%
+    Loss beruntun maks : 3
+    BUY/SELL      : 2/5
+    Median MFE    : $5.17  | spread median entry: $0.570
+
+  RINCIAN BULANAN — PLAN SAAT INI — guard $0.35 | risk $500
+  Bulan     | Entry | tr/hr-aktif |      W/BE/L |    WR% |     PF |        Net $ |    Ekuitas $
+  --------------------------------------------------------------------------------------------
+  2025-09   |     2 |       1.00 |   0/  0/  2 |    0.0 |   0.00 |         -990 |        9,010
+  2026-05   |     2 |       1.00 |   1/  0/  1 |   50.0 |   1.69 |         +342 |        9,352
+  2026-06   |     1 |       1.00 |   1/  0/  0 |  100.0 |    inf |          +99 |        9,451
+  2026-07   |     1 |       1.00 |   0/  0/  1 |    0.0 |   0.00 |         -495 |        8,956
+  2026-08   |     1 |       1.00 |   1/  0/  0 |  100.0 |    inf |         +486 |        9,441
+  --------------------------------------------------------------------------------------------
+  TOTAL     |     7 |            |   3/  0/  4   |        |        |         -559 |
+  Rata-rata entry/bulan : 1.4  (5 bulan ber-trade, 3 bulan hijau)
+
+>>> PLAN SAAT INI — guard $1.20 | risk $500
+    Trades        : 110  (54W / 0BE / 56L)
+    Win Rate      : 49.09%   | Non-Loss Rate: 49.09%
+    Profit Factor : 0.64
+    Net PnL       : $-10,001.57  (ROI -100.02%)
+    Ekspektasi    : $-90.92/trade
+    AvgWin/AvgLoss: $+328.12 / $-495.00
+    Max Drawdown  : 100.02%  ($10,001.57)
+    Ekuitas akhir : $-1.57 dari $10,000
+    Tr/hari bursa : 0.35  | tr/hari aktif: 3.24
+    TP1/TP2/TP3   : 20.9% / 4.5% / 1.8%  | trailing aktif: 49.1%
+    Loss beruntun maks : 6
+    BUY/SELL      : 25/85
+    Median MFE    : $8.93  | spread median entry: $0.636
+    ⛔ SIMULASI BANGKRUT (ekuitas habis; entri berhenti saat modal <= 0).
+
+  RINCIAN BULANAN — PLAN SAAT INI — guard $1.20 | risk $500
+  Bulan     | Entry | tr/hr-aktif |      W/BE/L |    WR% |     PF |        Net $ |    Ekuitas $
+  --------------------------------------------------------------------------------------------
+  2025-09   |    62 |       2.82 |  30/  0/ 32 |   48.4 |   0.67 |       -5,236 |        4,764
+  2025-10   |    48 |       5.33 |  24/  0/ 24 |   50.0 |   0.60 |       -4,766 |           -2
+  --------------------------------------------------------------------------------------------
+  TOTAL     |   110 |            |  54/  0/ 56   |        |        |      -10,002 |
+  Rata-rata entry/bulan : 55.0  (2 bulan ber-trade, 0 bulan hijau)
+
+>>> PLAN SAAT INI — guard $1.20 | risk $100 (1%, referensi)
+    Trades        : 1278  (730W / 0BE / 548L)
+    Win Rate      : 57.12%   | Non-Loss Rate: 57.12%
+    Profit Factor : 0.89
+    Net PnL       : $-6,557.01  (ROI -65.57%)
+    Ekspektasi    : $-5.13/trade
+    AvgWin/AvgLoss: $+69.84 / $-105.00
+    Max Drawdown  : 65.57%  ($6,557.01)
+    Ekuitas akhir : $3,442.99 dari $10,000
+    Tr/hari bursa : 4.08  | tr/hari aktif: 4.63
+    TP1/TP2/TP3   : 25.7% / 4.7% / 1.0%  | trailing aktif: 57.1%
+    Loss beruntun maks : 8
+    BUY/SELL      : 598/680
+    Median MFE    : $10.86  | spread median entry: $0.715
+
+  RINCIAN BULANAN — PLAN SAAT INI — guard $1.20 | risk $100 (1%)
+  Bulan     | Entry | tr/hr-aktif |      W/BE/L |    WR% |     PF |        Net $ |    Ekuitas $
+  --------------------------------------------------------------------------------------------
+  2025-09   |    62 |       2.82 |  30/  0/ 32 |   48.4 |   0.67 |       -1,111 |        8,889
+  2025-10   |   109 |       4.74 |  56/  0/ 53 |   51.4 |   0.73 |       -1,526 |        7,363
+  2025-11   |    73 |       3.84 |  43/  0/ 30 |   58.9 |   0.85 |         -474 |        6,889
+  2025-12   |    88 |       4.00 |  52/  0/ 36 |   59.1 |   1.04 |         +170 |        7,059
+  2026-01   |   102 |       4.86 |  61/  0/ 41 |   59.8 |   1.05 |         +201 |        7,260
+  2026-02   |   117 |       6.50 |  72/  0/ 45 |   61.5 |   0.89 |         -522 |        6,738
+  2026-03   |   169 |       7.68 |  99/  0/ 70 |   58.6 |   0.91 |         -632 |        6,105
+  2026-04   |   117 |       5.57 |  68/  0/ 49 |   58.1 |   1.01 |          +71 |        6,176
+  2026-05   |   109 |       5.19 |  66/  0/ 43 |   60.6 |   0.91 |         -394 |        5,782
+  2026-06   |   115 |       5.23 |  62/  0/ 53 |   53.9 |   0.85 |         -823 |        4,958
+  2026-07   |   103 |       4.48 |  59/  0/ 44 |   57.3 |   0.92 |         -358 |        4,601
+  2026-08   |   108 |       5.14 |  60/  0/ 48 |   55.6 |   0.85 |         -780 |        3,821
+  2026-09   |     6 |       6.00 |   2/  0/  4 |   33.3 |   0.10 |         -378 |        3,443
+  --------------------------------------------------------------------------------------------
+  TOTAL     |  1278 |            | 730/  0/548   |        |        |       -6,557 |
+  Rata-rata entry/bulan : 98.3  (13 bulan ber-trade, 3 bulan hijau)
+
+>>> BASELINE ACAK — guard $1.20 | risk $100 (pengukur edge sinyal)
+    Trades        : 833  (486W / 0BE / 347L)
+    Win Rate      : 58.34%   | Non-Loss Rate: 58.34%
+    Profit Factor : 1.02
+    Net PnL       : $+779.17  (ROI +7.79%)
+    Ekspektasi    : $+0.94/trade
+    AvgWin/AvgLoss: $+76.57 / $-105.00
+    Max Drawdown  : 22.69%  ($2,648.48)
+    Ekuitas akhir : $10,779.17 dari $10,000
+    Tr/hari bursa : 2.66  | tr/hari aktif: 3.19
+    TP1/TP2/TP3   : 28.6% / 6.1% / 1.4%  | trailing aktif: 58.3%
+    Loss beruntun maks : 8
+    BUY/SELL      : 440/393
+    Median MFE    : $11.19  | spread median entry: $0.683

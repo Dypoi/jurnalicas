@@ -68,7 +68,8 @@ def build_trades(events):
         ev = e.get("event")
         tk = e.get("ticket")
         if ev in ("order_open", "position_adopted", "tp_hit", "trail_update",
-                  "be_lock", "position_closed", "position_closed_offline") and tk is not None:
+                  "be_lock", "position_closed", "position_closed_offline",
+                  "position_closed_pnl_backfill") and tk is not None:
             tr = t(tk)
             if ev == "order_open":
                 tr["open_ts"] = tr["open_ts"] or parse_ts(e.get("ts", ""))
@@ -87,6 +88,13 @@ def build_trades(events):
             elif ev in ("position_closed", "position_closed_offline"):
                 tr["close_ts"] = parse_ts(e.get("ts", "")) or tr["close_ts"]
                 tr["closed_context"] = e.get("context")
+                if e.get("realized_total") is not None:
+                    tr["realized_total"] = e.get("realized_total")
+                    tr["result"] = e.get("result")
+                    tr["deals_out"] = e.get("deals_out")
+            elif ev == "position_closed_pnl_backfill":
+                # [AUDIT 3 — A3-03] PnL retroaktif dari daemon (riwayat deal
+                # dulu flaky saat konfirmasi tutup) — sumber terakhir menang.
                 if e.get("realized_total") is not None:
                     tr["realized_total"] = e.get("realized_total")
                     tr["result"] = e.get("result")

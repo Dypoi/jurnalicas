@@ -1,0 +1,31 @@
+PARITY CHECK G4 — g4_signal_at (live) vs signal_at mtf/pd/288 (riset)
+Periode dibanding : 2025-09-01 .. 2026-09-01 23:59:59 (warm-up histori 330 hari)
+Dibuat            : 2026-09-09 07:00
+Engine live       : src/strategy/g4_strategy.py (G4Strategy.evaluate + frames_from_raw + g4_signal_at)
+Engine riset      : research/backtest_m1_audit.py::signal_at (mode mtf) + research/tuning_mtf.py::add_mtf_columns
+Konfigurasi G4    : config.py STRATEGY='G4' (sweep 288, FVG $0.30, EMA200-H1 grid per-jam, guard spread $1.20)
+
+Memuat M1 (warm-up 330 hari + setahun, replika tuning_mtf) ...
+  134,882 bar M5  2024-10-06 22:00:00 .. 2026-09-01 20:55:00
+  frame live: M5=134,882  M15=44,975  H1=11,251
+  jendela banding: bar 63754..134881 (2025-09-01 00:00:00 ..)
+
+[PASS A] geometri murni  (71,128 bar, 318.4s)
+  sinyal engine riset : 3694
+  sinyal g4_signal_at : 3694
+  MISMATCH            : 0
+
+[PASS B] guard spread $1.20
+  sinyal engine riset (guard aktif): 3562
+  MISMATCH                          : 0
+
+[PASS C] jalur penuh G4Strategy.evaluate (3694 sinyal, 132 terguard spread)
+  arah + anchor entry/SL + lot S-04 : OK
+
+[PASS D] burn-in EMA200-grid: setahun vs jendela 5000 bar H1
+  max |EMA_fullhistory - EMA_window5000| = $0.000000
+  flip keputusan bias pada 300 bar sampel : 0
+
+==============================================================================
+VERDICT PARITY G4: IDENTIK — sinyal live terbukti = engine riset
+==============================================================================

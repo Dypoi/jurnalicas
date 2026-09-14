@@ -1,0 +1,12 @@
+================================================================================================
+ 🎲 MONTE-CARLO MULTI-SEED | 2022-09-01 .. 2023-09-01 | risk $100 | 32 seed acak | eksekusi M5
+================================================================================================
+ Kandidat                                     |   Tr |     PF |      Net $ |     Acak net μ (min..maks) | PF acak μ |  p-value | Vonis
+----------------------------------------------------------------------------------------------------------------------------------
+ V7T — V7 + filter tren SMA200-harian         |   34 |   0.90 |       -171 |       +50 (    -696..  +1,186) |      1.28 |    0.688 | TIDAK BEDA DARI ACAK
+ V7E — V7 + filter tren EMA200-harian         |   39 |   0.94 |       -105 |        -1 (    -809..  +1,050) |      1.19 |    0.562 | TIDAK BEDA DARI ACAK
+ V7TA — V7T exit 2-tier TP 100/200 (50/50)    |   34 |   0.84 |       -266 |       +49 (    -626..    +858) |      1.26 |    0.812 | TIDAK BEDA DARI ACAK
+ V7TD — V7T exit 2-tier TP 100/187.5 (60/40)  |   34 |   0.80 |       -332 |       +48 (    -613..    +832) |      1.26 |    0.875 | TIDAK BEDA DARI ACAK
+
+p-value = fraksi seed acak dengan net >= kandidat (empiris, satu sisi).
+Catatan: p-value berlaku utk periode & geometri ini saja; tetap bukan jaminan

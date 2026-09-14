@@ -53,6 +53,12 @@ def main():
          "deals_out": 2, "result": "WIN", "tp1_hit": True},
         {"ts": now, "event": "position_closed_offline", "ticket": 555000, "realized_total": -500.0,
          "deals_out": 1, "result": "LOSS"},
+        # [AUDIT 3 — A3-03] close TANPA PnL (riwayat flaky saat konfirmasi) lalu
+        # PnL-nya datang belakangan via position_closed_pnl_backfill.
+        {"ts": now, "event": "position_closed", "ticket": 555003,
+         "deals_out": 2, "tp1_hit": True},
+        {"ts": now, "event": "position_closed_pnl_backfill", "ticket": 555003,
+         "realized_total": -250.0, "deals_out": 2, "result": "LOSS", "attempts": 3},
         {"ts": now, "event": "equity_snapshot", "balance": 10012.5, "equity": 10012.5},
     ]
     with open(jf, "w", encoding="utf-8") as f:
@@ -77,8 +83,9 @@ def main():
         j = d["journal"]
         check("status engine AKTIF (event barusan) ", "AKTIF" in j.get("engine_state", ""))
         check("signals/orders hari ini 1/1", j.get("signals_today") == 1 and j.get("orders_today") == 1)
-        check("PnL hari ini = +12.50 (512.5-500)", abs(j.get("pnl_today", 0) - 12.5) < 1e-9)
-        check("closed_trades_logged=2", j.get("closed_trades_logged") == 2)
+        check("PnL hari ini = -237.50 (512.5-500-250, termasuk PnL backfill)",
+              abs(j.get("pnl_today", 0) - (-237.5)) < 1e-9)
+        check("closed_trades_logged=3", j.get("closed_trades_logged") == 3)
 
         r = client.get("/api/stats")
         s = r.get_json()
@@ -86,10 +93,45 @@ def main():
         check("HTTP 200", r.status_code == 200)
         check("Sumber = jurnal_engine_v2 (bukan backtest repo)",
               s.get("stats", {}).get("source") == "jurnal_engine_v2")
-        check("total_trades=2 (1 WIN+1 LOSS)", s.get("stats", {}).get("total_trades") == 2)
-        check("PF ≈ 512.5/500 = 1.025 (toleransi float rounding)",
-              abs(s.get("stats", {}).get("profit_factor", 0) - 1.025) <= 0.011)
-        check("baris recent_trades ada", len(s.get("recent_trades", [])) == 2)
+        check("total_trades=3 (termasuk tiket yang PnL-nya di-backfill)",
+              s.get("stats", {}).get("total_trades") == 3)
+        check("PF ≈ 512.5/750 = 0.683 (toleransi float rounding)",
+              abs(s.get("stats", {}).get("profit_factor", 0) - 0.683) <= 0.011)
+        check("baris recent_trades ada", len(s.get("recent_trades", [])) == 3)
+
+        # [AUDIT 3 — A3-04] flag TP posisi aktif harus dibaca dari state daemon,
+        # bukan dari bridge dashboard (yang selalu default False).
+        print("\n[B2] /api/status — flag posisi aktif dari state daemon")
+        real_state_file = config.STATE_FILE
+        fixture_state = os.path.join(os.path.dirname(jf), "icas_state.verify_fixture.json")
+        with open(fixture_state, "w", encoding="utf-8") as f:
+            json.dump({"positions": {"555002": {
+                "tp1_hit": True, "tp2_hit": True, "tp3_hit": False,
+                "be_set": True, "trail_step": 2, "initial_volume": 0.31}},
+                "daily": {}, "closed": {}}, f)
+        config.STATE_FILE = fixture_state
+        _pos_backup = dash.bridge.active_position
+        dash.bridge.active_position = {
+            "ticket": 555002, "type": "BUY", "volume": 0.23, "price_open": 4680.0,
+            "sl": 4683.0, "tp": 0.0, "profit": 12.5, "tp1_hit": False, "tp2_hit": False,
+            "tp3_hit": False, "be_set": False, "max_fav": 3.1, "trail_step": 0,
+            "initial_volume": 0.31}
+        try:
+            r = client.get("/api/status")
+            p = r.get_json().get("active_position") or {}
+            check("posisi aktif terkirim", bool(p))
+            check("tp1_hit=True & tp2_hit=True dari state daemon (bukan default False)",
+                  p.get("tp1_hit") is True and p.get("tp2_hit") is True)
+            check("tp3_hit=False & be_set=True & trail_step=2 dari state daemon",
+                  p.get("tp3_hit") is False and p.get("be_set") is True
+                  and p.get("trail_step") == 2)
+        finally:
+            config.STATE_FILE = real_state_file
+            dash.bridge.active_position = _pos_backup
+            try:
+                os.remove(fixture_state)
+            except OSError:
+                pass
 
         r = client.get("/api/journal?n=6")
         jn = r.get_json()

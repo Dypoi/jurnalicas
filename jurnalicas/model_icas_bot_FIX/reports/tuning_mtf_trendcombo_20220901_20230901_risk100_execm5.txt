@@ -1,0 +1,216 @@
+/home/user/jurnalicas/jurnalicas/model_icas_bot_FIX/research/backtest_m1_period.py:64: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  month = local.dt.to_period("M").astype(str)
+/home/user/jurnalicas/jurnalicas/model_icas_bot_FIX/research/backtest_m1_period.py:64: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  month = local.dt.to_period("M").astype(str)
+/home/user/jurnalicas/jurnalicas/model_icas_bot_FIX/research/backtest_m1_period.py:64: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  month = local.dt.to_period("M").astype(str)
+====================================================================================================
+ 🔧 TUNING MULTI-TIMEFRAME (H1->M30->M15->M5, eksekusi M5) | 2022-09-01 .. 2023-09-01
+====================================================================================================
+Data          : 3 file XAUUSD_M1 (warm-up 20211006 → konvergensi EMA200-H1)
+Bar M1/M5     : 677,333 / 71,168 (hari bursa M5: 311)
+Harga periode : 1,614.71 .. 2,079.78
+Guard spread  : $1.20 | risk/trade $100 | modal $10,000
+Kausalitas    : EMA200-H1 valid pada 71,168/71,168 bar M5  ✅
+Kausalitas    : SSL/BSL-M30 71,168/71,168  ✅ | PDH/PDL 71,168/71,168  ✅ | fract-M30 71,168/71,168  ✅ | swing-M15 71,168/71,168  ✅
+Geometri      : SL150 | TP 187.5/375/562.5 | split 30/25/25/20 | trail 100/30 | BE+ OFF | 24 jam
+Kaskade       : L1 H1 bias EMA200 → L2 M30 sweep SSL/BSL 24j → L3 M15 CHoCH 5-bar → L4 M5 displacement/FVG (anti-repaint, pesimis, spread riil)
+Eksekusi      : M5 — 135,490 bar eksekusi; entry di OPEN bar M5 berikutnya; SL/TP/trailing dievaluasi per bar M5 (pesimis [A5]); strict_bar_open_entry ON (entry diblok bila posisi lama exit di candle sama); manage_entry_bar ON (candle eksekusi ikut diuji SL/TP — order broker aktif sejak entry)
+
+>>> V7 — MTF FULL, likuiditas PDH/PDL (fresh) (risk $100)
+    Trades        : 60  (34W / 0BE / 26L)
+    Win Rate      : 56.67%   | Non-Loss Rate: 56.67%
+    Profit Factor : 0.90
+    Net PnL       : $-287.11  (ROI -2.87%)
+    Ekspektasi    : $-4.79/trade
+    AvgWin/AvgLoss: $+71.85 / $-105.00
+    Max Drawdown  : 6.46%  ($648.36)
+    Ekuitas akhir : $9,712.89 dari $10,000
+    Tr/hari bursa : 0.19  | tr/hari aktif: 1.05
+    TP1/TP2/TP3   : 26.7% / 5.0% / 0.0%  | trailing aktif: 56.7%
+    Loss beruntun maks : 4
+    BUY/SELL      : 35/25
+    Median MFE    : $11.02  | spread median entry: $0.370
+
+  RINCIAN BULANAN — V7 — MTF FULL, likuiditas PDH/PDL (fresh)
+  Bulan     | Entry | tr/hr-aktif |      W/BE/L |    WR% |     PF |        Net $ |    Ekuitas $
+  --------------------------------------------------------------------------------------------
+  2022-09   |     4 |       1.00 |   3/  0/  1 |   75.0 |   1.38 |          +40 |       10,040
+  2022-10   |     4 |       1.33 |   1/  0/  3 |   25.0 |   0.07 |         -294 |        9,746
+  2022-11   |     8 |       1.00 |   4/  0/  4 |   50.0 |   0.84 |          -66 |        9,680
+  2022-12   |     4 |       1.00 |   2/  0/  2 |   50.0 |   0.59 |          -86 |        9,594
+  2023-01   |     6 |       1.00 |   4/  0/  2 |   66.7 |   1.84 |         +176 |        9,770
+  2023-02   |     4 |       1.00 |   2/  0/  2 |   50.0 |   0.20 |         -168 |        9,602
+  2023-03   |     9 |       1.29 |   5/  0/  4 |   55.6 |   1.27 |         +111 |        9,713
+  2023-04   |     3 |       1.00 |   2/  0/  1 |   66.7 |   0.40 |          -63 |        9,650
+  2023-05   |     6 |       1.00 |   4/  0/  2 |   66.7 |   1.18 |          +38 |        9,688
+  2023-06   |     4 |       1.00 |   3/  0/  1 |   75.0 |   2.16 |         +122 |        9,810
+  2023-07   |     3 |       1.00 |   1/  0/  2 |   33.3 |   0.84 |          -33 |        9,778
+  2023-08   |     4 |       1.00 |   2/  0/  2 |   50.0 |   0.59 |          -86 |        9,692
+  2023-09   |     1 |       1.00 |   1/  0/  0 |  100.0 |    inf |          +21 |        9,713
+  --------------------------------------------------------------------------------------------
+  TOTAL     |    60 |            |  34/  0/ 26   |        |        |         -287 |
+  Rata-rata entry/bulan : 4.6  (13 bulan ber-trade, 6 bulan hijau)
+
+>>> V7T — V7 + filter tren SMA200-harian (risk $100)
+    Trades        : 34  (18W / 0BE / 16L)
+    Win Rate      : 52.94%   | Non-Loss Rate: 52.94%
+    Profit Factor : 0.90
+    Net PnL       : $-171.46  (ROI -1.71%)
+    Ekspektasi    : $-5.04/trade
+    AvgWin/AvgLoss: $+83.81 / $-105.00
+    Max Drawdown  : 4.00%  ($400.92)
+    Ekuitas akhir : $9,828.54 dari $10,000
+    Tr/hari bursa : 0.11  | tr/hari aktif: 1.1
+    TP1/TP2/TP3   : 29.4% / 5.9% / 0.0%  | trailing aktif: 52.9%
+    Loss beruntun maks : 3
+    BUY/SELL      : 25/9
+    Median MFE    : $10.45  | spread median entry: $0.351
+
+  RINCIAN BULANAN — V7T — V7 + filter tren SMA200-harian
+  Bulan     | Entry | tr/hr-aktif |      W/BE/L |    WR% |     PF |        Net $ |    Ekuitas $
+  --------------------------------------------------------------------------------------------
+  2022-09   |     3 |       1.00 |   2/  0/  1 |   66.7 |   1.18 |          +19 |       10,019
+  2022-10   |     2 |       2.00 |   1/  0/  1 |   50.0 |   0.20 |          -84 |        9,935
+  2022-11   |     2 |       1.00 |   0/  0/  2 |    0.0 |   0.00 |         -210 |        9,725
+  2022-12   |     4 |       1.00 |   2/  0/  2 |   50.0 |   0.59 |          -86 |        9,639
+  2023-01   |     6 |       1.00 |   4/  0/  2 |   66.7 |   1.84 |         +176 |        9,815
+  2023-03   |     8 |       1.33 |   5/  0/  3 |   62.5 |   1.69 |         +216 |       10,031
+  2023-04   |     2 |       1.00 |   1/  0/  1 |   50.0 |   0.20 |          -84 |        9,947
+  2023-05   |     1 |       1.00 |   1/  0/  0 |  100.0 |    inf |         +103 |       10,050
+  2023-06   |     1 |       1.00 |   0/  0/  1 |    0.0 |   0.00 |         -105 |        9,945
+  2023-07   |     2 |       1.00 |   1/  0/  1 |   50.0 |   1.69 |          +72 |       10,018
+  2023-08   |     2 |       1.00 |   0/  0/  2 |    0.0 |   0.00 |         -210 |        9,808
+  2023-09   |     1 |       1.00 |   1/  0/  0 |  100.0 |    inf |          +21 |        9,829
+  --------------------------------------------------------------------------------------------
+  TOTAL     |    34 |            |  18/  0/ 16   |        |        |         -171 |
+  Rata-rata entry/bulan : 2.8  (12 bulan ber-trade, 6 bulan hijau)
+
+>>> V8T — V8 + filter tren SMA200-harian (risk $100)
+    Trades        : 68  (43W / 0BE / 25L)
+    Win Rate      : 63.24%   | Non-Loss Rate: 63.24%
+    Profit Factor : 0.98
+    Net PnL       : $-49.98  (ROI -0.50%)
+    Ekspektasi    : $-0.73/trade
+    AvgWin/AvgLoss: $+59.88 / $-105.00
+    Max Drawdown  : 5.69%  ($570.84)
+    Ekuitas akhir : $9,950.02 dari $10,000
+    Tr/hari bursa : 0.22  | tr/hari aktif: 1.13
+    TP1/TP2/TP3   : 23.5% / 2.9% / 0.0%  | trailing aktif: 63.2%
+    Loss beruntun maks : 4
+    BUY/SELL      : 44/24
+    Median MFE    : $12.09  | spread median entry: $0.365
+
+  RINCIAN BULANAN — V8T — V8 + filter tren SMA200-harian
+  Bulan     | Entry | tr/hr-aktif |      W/BE/L |    WR% |     PF |        Net $ |    Ekuitas $
+  --------------------------------------------------------------------------------------------
+  2022-09   |     9 |       1.12 |   7/  0/  2 |   77.8 |   1.09 |          +19 |       10,019
+  2022-10   |     4 |       1.33 |   3/  0/  1 |   75.0 |   0.60 |          -42 |        9,977
+  2022-11   |     7 |       1.17 |   2/  0/  5 |   28.6 |   0.24 |         -401 |        9,576
+  2022-12   |     6 |       1.00 |   4/  0/  2 |   66.7 |   1.96 |         +202 |        9,778
+  2023-01   |    10 |       1.11 |   7/  0/  3 |   70.0 |   1.16 |          +51 |        9,830
+  2023-03   |    10 |       1.43 |   6/  0/  4 |   60.0 |   1.32 |         +132 |        9,962
+  2023-04   |     4 |       1.00 |   2/  0/  2 |   50.0 |   0.59 |          -86 |        9,876
+  2023-05   |     3 |       1.00 |   2/  0/  1 |   66.7 |   1.18 |          +19 |        9,895
+  2023-06   |     4 |       1.00 |   2/  0/  2 |   50.0 |   0.59 |          -86 |        9,809
+  2023-07   |     6 |       1.00 |   5/  0/  1 |   83.3 |   3.74 |         +288 |       10,097
+  2023-08   |     4 |       1.33 |   2/  0/  2 |   50.0 |   0.20 |         -168 |        9,929
+  2023-09   |     1 |       1.00 |   1/  0/  0 |  100.0 |    inf |          +21 |        9,950
+  --------------------------------------------------------------------------------------------
+  TOTAL     |    68 |            |  43/  0/ 25   |        |        |          -50 |
+  Rata-rata entry/bulan : 5.7  (12 bulan ber-trade, 7 bulan hijau)
+
+>>> W24h — PDH/PDL jendela 24 jam (288 bar) (risk $100)
+    Trades        : 195  (113W / 0BE / 82L)
+/home/user/jurnalicas/jurnalicas/model_icas_bot_FIX/research/backtest_m1_period.py:64: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  month = local.dt.to_period("M").astype(str)
+/home/user/jurnalicas/jurnalicas/model_icas_bot_FIX/research/backtest_m1_period.py:64: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  month = local.dt.to_period("M").astype(str)
+/home/user/jurnalicas/jurnalicas/model_icas_bot_FIX/research/tuning_trend_filter.py:132: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  month = local.dt.to_period("M").astype(str)
+/home/user/jurnalicas/jurnalicas/model_icas_bot_FIX/research/tuning_trend_filter.py:132: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  month = local.dt.to_period("M").astype(str)
+/home/user/jurnalicas/jurnalicas/model_icas_bot_FIX/research/tuning_trend_filter.py:132: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  month = local.dt.to_period("M").astype(str)
+/home/user/jurnalicas/jurnalicas/model_icas_bot_FIX/research/tuning_trend_filter.py:132: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  month = local.dt.to_period("M").astype(str)
+/home/user/jurnalicas/jurnalicas/model_icas_bot_FIX/research/tuning_trend_filter.py:132: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.
+  month = local.dt.to_period("M").astype(str)
+    Win Rate      : 57.95%   | Non-Loss Rate: 57.95%
+    Profit Factor : 0.85
+    Net PnL       : $-1,251.56  (ROI -12.52%)
+    Ekspektasi    : $-6.42/trade
+    AvgWin/AvgLoss: $+65.12 / $-105.00
+    Max Drawdown  : 25.71%  ($2,833.31)
+    Ekuitas akhir : $8,748.44 dari $10,000
+    Tr/hari bursa : 0.63  | tr/hari aktif: 1.23
+    TP1/TP2/TP3   : 24.6% / 3.1% / 1.0%  | trailing aktif: 57.9%
+    Loss beruntun maks : 9
+    BUY/SELL      : 107/88
+    Median MFE    : $11.15  | spread median entry: $0.363
+
+  RINCIAN BULANAN — W24h — PDH/PDL jendela 24 jam (288 bar)
+  Bulan     | Entry | tr/hr-aktif |      W/BE/L |    WR% |     PF |        Net $ |    Ekuitas $
+  --------------------------------------------------------------------------------------------
+  2022-09   |    19 |       1.36 |  13/  0/  6 |   68.4 |   1.38 |         +242 |       10,242
+  2022-10   |    16 |       1.23 |   9/  0/  7 |   56.2 |   0.88 |          -87 |       10,155
+  2022-11   |    12 |       1.00 |   7/  0/  5 |   58.3 |   1.69 |         +362 |       10,517
+  2022-12   |    16 |       1.33 |   9/  0/  7 |   56.2 |   0.82 |         -136 |       10,382
+  2023-01   |    20 |       1.33 |  12/  0/  8 |   60.0 |   0.85 |         -122 |       10,259
+  2023-02   |    16 |       1.23 |  11/  0/  5 |   68.8 |   1.08 |          +41 |       10,300
+  2023-03   |    24 |       1.60 |  12/  0/ 12 |   50.0 |   0.69 |         -394 |        9,906
+  2023-04   |    22 |       1.38 |   8/  0/ 14 |   36.4 |   0.34 |         -974 |        8,932
+  2023-05   |    17 |       1.21 |   9/  0/  8 |   52.9 |   0.67 |         -274 |        8,659
+  2023-06   |    13 |       1.08 |   7/  0/  6 |   53.8 |   0.88 |          -73 |        8,586
+  2023-07   |    11 |       1.00 |   9/  0/  2 |   81.8 |   1.06 |          +12 |        8,598
+  2023-08   |     9 |       1.00 |   7/  0/  2 |   77.8 |   1.72 |         +150 |        8,748
+  --------------------------------------------------------------------------------------------
+  TOTAL     |   195 |            | 113/  0/ 82   |        |        |       -1,252 |
+  Rata-rata entry/bulan : 16.2  (12 bulan ber-trade, 5 bulan hijau)
+
+>>> BASELINE ACAK (n=195, risk $100)
+    Trades        : 80  (44W / 0BE / 36L)
+    Win Rate      : 55.00%   | Non-Loss Rate: 55.00%
+    Profit Factor : 0.76
+    Net PnL       : $-898.97  (ROI -8.99%)
+    Ekspektasi    : $-11.24/trade
+    AvgWin/AvgLoss: $+65.48 / $-105.00
+    Max Drawdown  : 18.84%  ($2,050.88)
+    Ekuitas akhir : $9,101.03 dari $10,000
+    Tr/hari bursa : 0.26  | tr/hari aktif: 1.05
+    TP1/TP2/TP3   : 25.0% / 2.5% / 1.2%  | trailing aktif: 55.0%
+    Loss beruntun maks : 5
+    BUY/SELL      : 42/38
+    Median MFE    : $10.26  | spread median entry: $0.359
+
+  RINCIAN BULANAN — BASELINE ACAK (kontrol)
+  Bulan     | Entry | tr/hr-aktif |      W/BE/L |    WR% |     PF |        Net $ |    Ekuitas $
+  --------------------------------------------------------------------------------------------
+  2022-09   |    10 |       1.25 |   9/  0/  1 |   90.0 |   7.81 |         +715 |       10,715
+  2022-10   |     6 |       1.20 |   3/  0/  3 |   50.0 |   0.62 |         -121 |       10,595
+  2022-11   |     8 |       1.00 |   3/  0/  5 |   37.5 |   0.58 |         -219 |       10,375
+  2022-12   |    10 |       1.11 |   2/  0/  8 |   20.0 |   0.15 |         -716 |        9,659
+  2023-01   |     7 |       1.00 |   4/  0/  3 |   57.1 |   0.68 |         -100 |        9,559
+  2023-02   |     5 |       1.00 |   3/  0/  2 |   60.0 |   0.30 |         -147 |        9,412
+  2023-03   |     4 |       1.00 |   2/  0/  2 |   50.0 |   1.22 |          +45 |        9,457
+  2023-04   |     4 |       1.00 |   2/  0/  2 |   50.0 |   0.20 |         -168 |        9,289
+  2023-05   |     6 |       1.00 |   2/  0/  4 |   33.3 |   0.37 |         -263 |        9,027
+  2023-06   |     7 |       1.00 |   5/  0/  2 |   71.4 |   0.89 |          -23 |        9,004
+  2023-07   |     6 |       1.00 |   5/  0/  1 |   83.3 |   3.35 |         +246 |        9,250
+  2023-08   |     7 |       1.00 |   4/  0/  3 |   57.1 |   0.53 |         -149 |        9,101
+  --------------------------------------------------------------------------------------------
+  TOTAL     |    80 |            |  44/  0/ 36   |        |        |         -899 |
+  Rata-rata entry/bulan : 6.7  (12 bulan ber-trade, 3 bulan hijau)
+
+====================================================================================================
+ RINGKASAN PERBANDINGAN MTF (risk $100, guard $1.20)
+====================================================================================================
+ Varian                                   |    Tr |    WR% |     PF |       Net $ |    Exp $ |    DD% | Entry/bln |  Hijau |  BUY/SELL
+------------------------------------------------------------------------------------------------------------------------
+ V7 — MTF FULL, likuiditas PDH/PDL (fresh) |    60 |   56.7 |   0.90 |        -287 |    -4.79 |    6.5 |       4.6 |   6/ 13 |   35/  25
+ V7T — V7 + filter tren SMA200-harian     |    34 |   52.9 |   0.90 |        -171 |    -5.04 |    4.0 |       2.8 |   6/ 12 |   25/   9
+ V8T — V8 + filter tren SMA200-harian     |    68 |   63.2 |   0.98 |         -50 |    -0.73 |    5.7 |       5.7 |   7/ 12 |   44/  24
+ W24h — PDH/PDL jendela 24 jam (288 bar)  |   195 |   58.0 |   0.85 |      -1,252 |    -6.42 |   25.7 |      16.2 |   5/ 12 |  107/  88
+ R — RANDOM n=195 (kontrol)               |    80 |   55.0 |   0.76 |        -899 |   -11.24 |   18.8 |       6.7 |   3/ 12 |   42/  38
+
+💾 Laporan tersimpan: /home/user/jurnalicas/jurnalicas/model_icas_bot_FIX/reports/tuning_mtf_20220901_20230901_risk100_execm5.txt
