@@ -97,7 +97,7 @@ def _journal_close(journal: TradeJournal, bridge: IcasMT5Bridge, ticket, context
 
 
 def _write_health_marker(path: str, journal_health: dict, bridge: IcasMT5Bridge,
-                         open_tickets: list) -> None:
+                         open_tickets: list, m5_age_s=None) -> None:
     """[F-08] Tulis penanda kesehatan daemon+jurnal agar dashboard (proses terpisah)
     bisa menampilkan apakah jurnal masih hidup dan apakah feed sehat."""
     if not path:
@@ -110,6 +110,10 @@ def _write_health_marker(path: str, journal_health: dict, bridge: IcasMT5Bridge,
             "journal": journal_health,
             "feed_valid": bool(tick.get("valid", True)),
             "feed_reason": tick.get("reason", "ok"),
+            # [OBSERVABILITY 15 Sep] umur bar M5 tertutup terakhir (dtk, None =
+            # candle belum tersedia). feed_valid = TICK; candle bisa macet
+            # sendiri (kejadian 15 Sep 01:20 WIB: tick OK, candle telat 3 jam).
+            "m5_age_seconds": (int(m5_age_s) if m5_age_s is not None else None),
             "terminal_healthy": bridge.is_feed_healthy(),
             "open_tickets": [str(t) for t in open_tickets],
         }
@@ -172,6 +176,47 @@ def _entry_blocked_same_bar_as_exit(last_flat_utc, now_utc=None) -> bool:
     now_u = now_utc or datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     bar_start = now_u.replace(minute=(now_u.minute // 5) * 5, second=0, microsecond=0)
     return last_flat_utc >= bar_start
+
+
+def _m5_last_closed_age_seconds(bridge):
+    """[OBSERVABILITY 15 Sep 2026] Umur (dtk) bar M5 TERTUTUP terakhir sebagaimana
+    dilihat engine — semantik identik frames_from_raw: konversi waktu server
+    MT5 (Europe/Athens) -> UTC, lalu bar terakhir (berjalan) DIBUANG.
+
+    Latar: kejadian 15 Sep 01:20 WIB — tick hidup sehingga heartbeat bilang
+    "Feed: OK", tapi riwayat candle terminal tertinggal 3 jam (bar 15:15 UTC
+    baru terlihat daemon pada 18:20 UTC, umur 10.800 dtk) sehingga SEMUA bar
+    baru dibuang guard basi dan bot tak bisa entry. Field heartbeat "Feed"
+    hanya membaca tick dan tidak bisa melihat kondisi ini.
+
+    Independen dari cabang sinyal (jalan juga saat posisi terbuka / mode
+    ICAS). Return None bila candle belum tersedia (terminal belum sync).
+    """
+    try:
+        raw = bridge.get_latest_candles("M5", 3)
+        if raw is None or len(raw) < 2 or "time" not in raw.columns:
+            return None
+        idx = pd.DatetimeIndex(pd.to_datetime(raw["time"]))
+        tz = pd.Timestamp("2026-01-01", tz="Europe/Athens").tz
+        idx = idx.tz_localize(tz).tz_convert("UTC").tz_localize(None)
+        idx = idx.sort_values()
+        last_closed_open = idx[-2]  # bar terakhir = berjalan, dibuang (spt engine)
+        now_u = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        return (now_u - (last_closed_open + pd.Timedelta(minutes=5))).total_seconds()
+    except Exception:
+        return None  # informatif saja — tidak boleh mengganggu heartbeat
+
+
+def _fmt_m5_age(age_s) -> str:
+    """[OBSERVABILITY 15 Sep 2026] Format umur bar M5 utk heartbeat:
+    None -> '—' (belum ada candle), <90 mnt -> 'Ndtk', sisanya 'N.Nj'."""
+    if age_s is None:
+        return "—"
+    if age_s < 0:
+        age_s = 0.0
+    if age_s < 5400:
+        return f"{int(age_s)}dtk"
+    return f"{age_s / 3600:.1f}j"
 
 
 def main():
@@ -489,9 +534,18 @@ def main():
                 tick = bridge.get_current_tick()
                 has_pos = bridge.has_open_positions()
                 _jh = journal.health()
+                # [OBSERVABILITY 15 Sep] umur bar M5 tertutup terakhir — "Feed: OK"
+                # hanya membaca TICK; tick hidup + candle macet 3 jam tetap tampil
+                # "OK" (kejadian 15 Sep 01:20 WIB) padahal semua entry diblok guard.
+                _m5_age = _m5_last_closed_age_seconds(bridge)
+                _m5_disp = _fmt_m5_age(_m5_age)
+                if (_m5_age is not None
+                        and _m5_age > int(getattr(config, "HEARTBEAT_CANDLE_STALE_SECONDS", 900))
+                        and datetime.datetime.now(datetime.timezone.utc).weekday() < 5):
+                    _m5_disp += " ⚠LAMBAT"  # hari kerja aja — weekend umur memang berjam-jam
                 _write_health_marker(getattr(config, "JOURNAL_HEALTH_FILE", ""), _jh,
-                                     bridge, list(open_tickets.keys()))
-                logger.info(f"[HEARTBEAT] Sesi: {kz_status_str} | Bid: {tick['bid']:.2f} | Spread: {tick['spread']:.1f} pts | Sinyal Hari Ini: {strategy.daily_trades_count} | Posisi Aktif: {1 if has_pos else 0} | Feed: {'OK' if tick.get('valid') else tick.get('reason')} | Jurnal err: {_jh['error_count']}")
+                                     bridge, list(open_tickets.keys()), m5_age_s=_m5_age)
+                logger.info(f"[HEARTBEAT] Sesi: {kz_status_str} | Bid: {tick['bid']:.2f} | Spread: {tick['spread']:.1f} pts | Sinyal Hari Ini: {strategy.daily_trades_count} | Posisi Aktif: {1 if has_pos else 0} | Feed: {'OK' if tick.get('valid') else tick.get('reason')} | M5: {_m5_disp} | Jurnal err: {_jh['error_count']}")
 
             # [ENGINE v2] Telemetri modal berkala untuk kurva observasi
             if now_time - last_equity_snap_time >= eq_snap_secs:

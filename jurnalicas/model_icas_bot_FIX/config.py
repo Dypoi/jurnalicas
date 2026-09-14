@@ -40,6 +40,14 @@ class IcasConfig:
                                           # adverse +$10.43 -> loss $178, bukan $105).
                                           # FALSE = frekuensi naik tapi keluar dari
                                           # perilaku yang menghasilkan +$4.493/thn.
+    HEARTBEAT_CANDLE_STALE_SECONDS: int = 900  # [OBSERVABILITY 15 Sep] ambang umur bar
+                                          # M5 tertutup terakhir (dtk) utk penanda
+                                          # ⚠LAMBAT di heartbeat (hanya Sen–Jum UTC).
+                                          # Normal 0–300 dtk. Kejadian 15 Sep 01:20 WIB:
+                                          # tick hidup ("Feed: OK") tapi riwayat candle
+                                          # terminal tertinggal 3 jam (bar 15:15 UTC
+                                          # baru terlihat 18:20 UTC, umur 10.800 dtk)
+                                          # sehingga semua bar baru dibuang guard basi.
 
     # Broker & Connection Settings
     SYMBOL: str = "XAUUSDm"                   # Auto-detects XAUUSD, GOLD, XAUUSDm on MT5
