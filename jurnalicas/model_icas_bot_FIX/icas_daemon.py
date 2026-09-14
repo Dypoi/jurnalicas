@@ -147,6 +147,33 @@ def _sl_improves(pos_type: str, new_sl: float, cur_sl: float) -> bool:
     return new_sl < float(cur_sl) - 1e-9
 
 
+def _entry_blocked_same_bar_as_exit(last_flat_utc, now_utc=None) -> bool:
+    """[PARITAS strict_bar_open_entry — 14 Sep 2026, bukti log live 10-14 Sep]
+    True bila entry harus DITUNDA karena posisi sebelumnya baru menjadi flat
+    DI DALAM bar M5 yang sedang berjalan.
+
+    Engine backtest G4 (tuning_scalpmtf, exec M5) berjalan dengan
+    strict_bar_open_entry ON: "entry diblok bila posisi lama exit di candle
+    yang sama dengan candle eksekusi". Angka +$4.493/thn dihitung DENGAN
+    blokir ini. Log live 10-14 Sep 2026 menunjukkan 11 dari 20 entry
+    terjadi di candle yang sama dengan exit posisi sebelumnya (sinyal
+    dievaluasi detik-detik setelah konfirmasi tutup) — perilaku yang TIDAK
+    diuji backtest. Guard ini menyamakan live dengan engine: re-entry hanya
+    boleh mulai bar M5 berikutnya setelah posisi flat.
+
+    Catatan toleransi: memakai waktu KONFIRMASI tutup (bukan waktu broker
+    closed_at) — tertinggal ~10-20 dtk, sehingga exit di ~15 dtk terakhir
+    sebuah bar bisa membuat guard sedikit LEBIH konservatif dari engine
+    (menunda 1 bar ekstra). Arah konservatif, dipilih demi kesederhanaan
+    zona waktu (closed_at broker dalam waktu lokal mesin).
+    """
+    if last_flat_utc is None:
+        return False
+    now_u = now_utc or datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    bar_start = now_u.replace(minute=(now_u.minute // 5) * 5, second=0, microsecond=0)
+    return last_flat_utc >= bar_start
+
+
 def main():
     logger.info("=" * 80)
     logger.info(f"   🚀 MODEL ICAS LIVE DAEMON — ENGINE BARU: {getattr(config, 'ENGINE_VERSION', 'v2')}")
@@ -334,6 +361,9 @@ def main():
                                   "max_fav_usd": _st_pos.get("max_fav")},
                            pending_pnl=pending_pnl)
             state_store.mark_closed(t, reason="offline_reconcile")   # [F-03]
+            # [strict_bar_open_entry] posisi baru flat saat daemon OFF —
+            # catat agar re-entry menunggu bar M5 berikutnya (parity engine).
+            last_flat_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
     # (b) Adopsi posisi yang masih terbuka (sisa sesi sebelumnya)
     if open_pos_now is not None:
@@ -345,6 +375,9 @@ def main():
         logger.info("Bot aktif dalam mode 24 JAM FULL MARKET. Memantau seluruh sesi secara kontinu...")
 
     last_scanned_bar_time = None
+    # [PARITAS strict_bar_open_entry — 14 Sep 2026] waktu (UTC) posisi terakhir
+    # dikonfirmasi FLAT; entry baru diblok bila masih dalam bar M5 yang sama.
+    last_flat_utc = None
     last_position_ticket = None
     last_heartbeat_time = 0
     last_equity_snap_time = time.time()
@@ -548,6 +581,9 @@ def main():
                                 logger.warning(f"🧟 REVIVE: tiket {pos['ticket']} dinyatakan tutup "
                                                f"{age:.0f}s lalu tetapi MASIH TERBUKA di broker — "
                                                f"state dipulihkan, TP tidak akan dobel.")
+                                # [strict_bar_open_entry] ternyata TIDAK flat —
+                                # batalkan penanda flat agar re-entry tak salah blokir.
+                                last_flat_utc = None
                                 journal.log("position_revived", ticket=pos["ticket"],
                                             declared_closed_at=tomb.get("closed_at"),
                                             age_seconds=round(age, 1),
@@ -820,6 +856,10 @@ def main():
                                              "max_fav_usd": snap.get("max_fav")},
                                       pending_pnl=pending_pnl)
                 state_store.mark_closed(tk, reason="online_confirmed")   # [F-03]
+                # [strict_bar_open_entry — 14 Sep 2026] catat waktu flat (UTC):
+                # entry baru menunggu bar M5 berikutnya (parity engine backtest;
+                # log live 10-14 Sep: 11/20 entry terjadi di candle sama dgn exit).
+                last_flat_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
                 open_tickets.pop(tk, None)
                 if visible_ticket is None:
                     last_position_ticket = None
@@ -912,7 +952,18 @@ def main():
                                         sig = strategy.evaluate(df5, df15, dfh1, balance,
                                                                 spread_usd=spread_usd_now)
                                         if sig is not None:
-                                            _emit_and_send(sig, balance, spread_usd_now)
+                                            if getattr(config, "STRICT_BAR_OPEN_ENTRY_LIVE", True) and \
+                                                    _entry_blocked_same_bar_as_exit(last_flat_utc):
+                                                logger.warning(f"⏭️ [{config.STRATEGY}] Re-entry DITUNDA: posisi lama baru "
+                                                               f"flat di dalam bar M5 berjalan (strict_bar_open_entry "
+                                                               f"engine — +$4.493 dihitung dgn blokir ini). Sinyal "
+                                                               f"{sig.type} dari bar {latest_time} dilewati; evaluasi "
+                                                               f"lanjut di bar M5 berikutnya.")
+                                                journal.log("signal_skipped_reentry", type=sig.type,
+                                                            bar=str(latest_time),
+                                                            flat_since=str(last_flat_utc))
+                                            else:
+                                                _emit_and_send(sig, balance, spread_usd_now)
                             else:
                                 logger.warning("⚠️ [G4] Riwayat M5/M15/H1 belum cukup "
                                                "(butuh >=350 M5 / 20 M15 / 260 H1) — "
@@ -936,7 +987,18 @@ def main():
                                                                  spread_usd=spread_usd_now)
 
                                 if sig is not None:
-                                    _emit_and_send(sig, balance, spread_usd_now)
+                                    if getattr(config, "STRICT_BAR_OPEN_ENTRY_LIVE", True) and \
+                                            _entry_blocked_same_bar_as_exit(last_flat_utc):
+                                        logger.warning(f"⏭️ [{config.STRATEGY}] Re-entry DITUNDA: posisi lama baru "
+                                                       f"flat di dalam bar M5 berjalan (strict_bar_open_entry "
+                                                       f"engine — +$4.493 dihitung dgn blokir ini). Sinyal "
+                                                       f"{sig.type} dari bar {latest_time} dilewati; evaluasi "
+                                                       f"lanjut di bar M5 berikutnya.")
+                                        journal.log("signal_skipped_reentry", type=sig.type,
+                                                    bar=str(latest_time),
+                                                    flat_since=str(last_flat_utc))
+                                    else:
+                                        _emit_and_send(sig, balance, spread_usd_now)
 
             consecutive_cycle_errors = 0
           except KeyboardInterrupt:

@@ -31,6 +31,15 @@ class IcasConfig:
                                           # koneksi putus = fill tak termodelkan backtest;
                                           # pelajaran tiket 5075405797: entry 223 dtk
                                           # setelah close bar -> slippage $2.67)
+    STRICT_BAR_OPEN_ENTRY_LIVE: bool = True  # [14 Sep 2026] PARITAS dgn engine backtest
+                                          # (strict_bar_open_entry ON): re-entry DITUNDA
+                                          # sampai bar M5 berikutnya bila posisi lama baru
+                                          # flat di dalam bar berjalan. Bukti log live
+                                          # 10-14 Sep: 11/20 entry = re-entry candle-sama
+                                          # (tidak diuji backtest; salah satunya slippage
+                                          # adverse +$10.43 -> loss $178, bukan $105).
+                                          # FALSE = frekuensi naik tapi keluar dari
+                                          # perilaku yang menghasilkan +$4.493/thn.
 
     # Broker & Connection Settings
     SYMBOL: str = "XAUUSDm"                   # Auto-detects XAUUSD, GOLD, XAUUSDm on MT5

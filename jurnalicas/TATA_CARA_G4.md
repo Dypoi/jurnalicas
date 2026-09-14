@@ -282,6 +282,7 @@ jendela 5.000 bar. Exit code 0 = IDENTIK.)
 | Tidak ada sinyal berjam-jam | Normal — G4 butuh konfluensi 4 lapis; rerata ~3–4 sinyal/hari bursa. |
 | `python: No module named pandas` | Venv belum aktif → `.venv\Scripts\activate`. |
 | `⏭️ [G4] Bar sinyal BASI dilewati ...` | Koneksi putus/lambat — bar sinyal terlanjur tua (> `G4_MAX_SIGNAL_AGE_SECONDS` 120 dtk) sehingga entry di tengah bar tidak sesuai asumsi backtest. Normal & aman; sinyal berikutnya tetap diproses. Kalau sering muncul: stabilkan internet / pertimbangkan VPS. |
+| `⏭️ [G4/ICAS] Re-entry DITUNDA ...` | Posisi lama baru tertutup di dalam bar M5 yang sedang berjalan — demi paritas dengan engine backtest (strict_bar_open_entry), entry baru menunggu bar M5 berikutnya (maks ±5 menit). Sinyal G4 berkelompok, jadi sinyal baru biasanya datang segera. Matikan via `STRICT_BAR_OPEN_ENTRY_LIVE: false` (tidak disarankan — keluar dari perilaku yang diuji backtest). |
 | `💨 Slippage FAVORABLE -x.xx USD` | Fill LEBIH BAIK dari anchor (mis. SELL isi lebih tinggi) — menguntungkan, bukan bahaya. |
 | `⚠️ Slippage ADVERSE +x.xx USD` | Fill lebih buruk dari anchor. Sekali-sekali (jam news/rollover) wajar; bila RUTIN > $0.50 di jam likuid normal → hentikan & evaluasi eksekusi broker. |
 | `🔧 SL re-anchor ke fill` | Fill menyimpang > $0.50 dari anchor (mis. pasca koneksi putus) — SL digeser agar kembali PERSIS 150 pips dari harga isi, identik engine backtest. |
