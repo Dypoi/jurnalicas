@@ -322,7 +322,17 @@ def main():
                     continue
             logger.info(f"🔎 Rekonsiliasi: tiket {t} terbukti tidak lagi terbuka -> "
                         f"tertutup saat daemon OFF")
-            _journal_close(journal, bridge, t, context="offline", pending_pnl=pending_pnl)
+            # [MF-02 · AUDIT MAX FAVORABLE 10 Sep 2026] close-offline dulu TANPA
+            # extra -> event position_closed_offline tanpa max_fav_usd -> tabel
+            # dashboard '+0.0 pips' padahal state store menyimpan puncaknya.
+            _st_pos = state_store.get_position(t) or {}
+            _journal_close(journal, bridge, t, context="offline",
+                           extra={"tp1_hit": _st_pos.get("tp1_hit"),
+                                  "tp2_hit": _st_pos.get("tp2_hit"),
+                                  "tp3_hit": _st_pos.get("tp3_hit"),
+                                  "trail_step": _st_pos.get("trail_step"),
+                                  "max_fav_usd": _st_pos.get("max_fav")},
+                           pending_pnl=pending_pnl)
             state_store.mark_closed(t, reason="offline_reconcile")   # [F-03]
 
     # (b) Adopsi posisi yang masih terbuka (sisa sesi sebelumnya)
@@ -590,6 +600,24 @@ def main():
                                         source="memory_snapshot",
                                         tp1_hit=pos.get("tp1_hit"), tp2_hit=pos.get("tp2_hit"),
                                         tp3_hit=pos.get("tp3_hit"), trail_step=pos.get("trail_step"))
+
+                # [MF-01 · AUDIT MAX FAVORABLE 10 Sep 2026] max_fav TIDAK BOLEH
+                # turun akibat pemulihan state. Dict posisi segar dari bridge
+                # berisi max_fav=0.0, dan jalur deals-rebuild hanya meng-infer
+                # max_fav bila trailing sudah bergeser — sehingga puncak pra-
+                # putus-koneksi hilang dan 'Max Favorable' jurnal/tabel menjadi
+                # 0 / palsu-kecil (gejala live: banner running +N pips, tabel
+                # setelah SL +0.0). Snapshot memori siklus-siklus sebelumnya
+                # adalah sumber terbaik: selalu ambil MAX, jalur pemulihan
+                # apa pun yang terpakai (state file / deals / tanpa pemulihan).
+                _snap_max_fav = ((open_tickets.get(pos["ticket"]) or {})
+                                 .get("snapshot") or {}).get("max_fav")
+                if isinstance(_snap_max_fav, (int, float)) and \
+                        _snap_max_fav > pos.get("max_fav", 0.0):
+                    pos["max_fav"] = _snap_max_fav
+                    logger.info(f"📈 max_fav tiket {pos['ticket']} dipulihkan dari "
+                                f"snapshot memori: ${_snap_max_fav:.2f} "
+                                f"({_snap_max_fav * 10:.0f} pips)")
 
                 # [F-03] initial_volume tidak boleh menyusut jadi volume sisa
                 _iv = pos.get("initial_volume")

@@ -211,7 +211,7 @@ def _stats_from_journal():
         tr = trades.setdefault(str(tk), {"time": e.get("ts", ""), "type": e.get("type"),
                                          "tp1": False, "tp2": False, "tp3": False,
                                          "be_set": False, "trail_step": 0, "pnl": None,
-                                         "max_fav": 0.0})
+                                         "max_fav": None})   # [MF-04] None = tak terlacak
         ev = e.get("event")
         if ev == "order_open":
             tr["time"] = e.get("ts", ""); tr["type"] = e.get("type")
@@ -224,8 +224,16 @@ def _stats_from_journal():
             tr["trail_step"] = max(tr["trail_step"], int(e.get("step", 0) or 0))
         elif ev in ("position_closed", "position_closed_offline"):
             tr["time"] = e.get("ts", "")
-            if e.get("max_fav_usd"):
-                tr["max_fav"] = round(float(e.get("max_fav_usd")) * 10.0, 1)
+            # [MF-04 · AUDIT MAX FAVORABLE 10 Sep 2026] dulu: truthy-check
+            # `if e.get("max_fav_usd")` — event TANPA field (close offline lama /
+            # rebuild) diam-diam menampilkan '+0.0 pips' yang tampak seperti
+            # "tidak pernah profit". Kini: tanpa field = None -> UI menampilkan
+            # '—' (tak terlacak), 0.0 asli tetap 0.0.
+            _mf = e.get("max_fav_usd")
+            if isinstance(_mf, (int, float)):
+                tr["max_fav"] = round(float(_mf) * 10.0, 1)
+            else:
+                tr["max_fav"] = None
             for k in ("tp1", "tp2", "tp3"):
                 if e.get(f"{k}_hit"):
                     tr[k] = True

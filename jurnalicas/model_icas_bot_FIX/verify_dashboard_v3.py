@@ -292,6 +292,42 @@ def main():
           all(k in src_html for k in ("why-panel", "api/tick", "api/g4_state",
                                       "m5-countdown", "chart-m5-countdown", "PDH")))
 
+    # -------------------------------------------------- MF (audit Max Favorable)
+    print("\n[MF] Max Favorable — jujur, tanpa 0.0 palsu (audit 10 Sep 2026)")
+    write_journal([
+        {"ts": now, "event": "engine_start"},
+        # tiket A: close ONLINE dgn max_fav terekam (normal)
+        {"ts": now, "event": "order_open", "ticket": 960001, "type": "SELL"},
+        {"ts": now, "event": "position_closed", "ticket": 960001,
+         "realized_total": 21.0, "max_fav_usd": 5.67},
+        # tiket B: close TANPA max_fav_usd (offline lama / rebuild) -> harus None, BUKAN 0.0
+        {"ts": now, "event": "order_open", "ticket": 960002, "type": "BUY"},
+        {"ts": now, "event": "position_closed_offline", "ticket": 960002,
+         "realized_total": -105.0},
+        # tiket C: max_fav_usd = 0.0 ASLI (loss lurus) -> tetap 0.0
+        {"ts": now, "event": "order_open", "ticket": 960003, "type": "SELL"},
+        {"ts": now, "event": "position_closed", "ticket": 960003,
+         "realized_total": -104.0, "max_fav_usd": 0.0},
+    ])
+    st = client.get("/api/stats").get_json()
+    tr = {t["pnl"]: t for t in st.get("recent_trades", [])}
+    mf = {t["time"]: t.get("max_fav") for t in st.get("recent_trades", [])}
+    by_pnl = {t["pnl"]: t.get("max_fav") for t in st.get("recent_trades", [])}
+    check("close online dgn max_fav 5.67 -> 56.7 pips",
+          by_pnl.get(21.0) == 56.7)
+    check("close TANPA field -> max_fav None (bukan 0.0 palsu)",
+          by_pnl.get(-105.0) is None)
+    check("close dgn max_fav_usd 0.0 ASLI -> tetap 0.0 (bukan None)",
+          by_pnl.get(-104.0) == 0.0)
+    check("template null-safe max_fav (t.max_fav === null -> '—')",
+          "t.max_fav === null" in src_html)
+    check("daemon: pemulihan max_fav dari snapshot memori (MF-01)",
+          "max_fav tiket" in open("icas_daemon.py", encoding="utf-8").read()
+          and "_snap_max_fav" in open("icas_daemon.py", encoding="utf-8").read())
+    check("daemon: close offline membawa max_fav dari state (MF-02)",
+          "max_fav_usd\": _st_pos.get" in open("icas_daemon.py", encoding="utf-8").read()
+          or 'max_fav_usd": _st_pos.get' in open("icas_daemon.py", encoding="utf-8").read())
+
     # --------------------------------------------------------------- regresi
     print("\n[REGRESI] endpoint & field lama tetap utuh")
     write_journal([

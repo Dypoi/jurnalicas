@@ -536,7 +536,7 @@
                             <td><span class="badge ${t.type === 'BUY' ? 'badge-live' : 'badge-red'}">${esc(t.type)}</span></td>
                             <td><span class="${tagClass}">${resText}</span></td>
                             <td class="${t.pnl >= 0 ? 'val-green' : 'val-red'}"><strong>$${t.pnl >= 0 ? '+' : ''}${Number(t.pnl).toFixed(2)}</strong></td>
-                            <td>+${Number(t.max_fav).toFixed(1)} pips</td>
+                            <td>${(t.max_fav === null || t.max_fav === undefined) ? '—' : ('+' + Number(t.max_fav).toFixed(1) + ' pips')}</td>
                             <td>${t.be_set ? '🛡️ Lock' : '-'}</td>
                             <td>${t.tp1 ? ('🎯 ' + CFG.r1 + 'x (+' + CFG.tp1.toFixed(0) + 'p)') : '-'}</td>
                             <td>${t.tp2 ? ('🎯 ' + CFG.r2 + 'x (+' + CFG.tp2.toFixed(0) + 'p)') : '-'}</td>
