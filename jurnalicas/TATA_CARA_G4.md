@@ -285,6 +285,8 @@ jendela 5.000 bar. Exit code 0 = IDENTIK.)
 | `💨 Slippage FAVORABLE -x.xx USD` | Fill LEBIH BAIK dari anchor (mis. SELL isi lebih tinggi) — menguntungkan, bukan bahaya. |
 | `⚠️ Slippage ADVERSE +x.xx USD` | Fill lebih buruk dari anchor. Sekali-sekali (jam news/rollover) wajar; bila RUTIN > $0.50 di jam likuid normal → hentikan & evaluasi eksekusi broker. |
 | `🔧 SL re-anchor ke fill` | Fill menyimpang > $0.50 dari anchor (mis. pasca koneksi putus) — SL digeser agar kembali PERSIS 150 pips dari harga isi, identik engine backtest. |
+| `📈 max_fav tiket … dipulihkan dari snapshot memori` | Informasi normal pasca koneksi pulih — puncak profit terlacak dikembalikan agar kolom Max Favorable di dashboard tidak hilang/nol palsu. |
+| Kolom Max Favorable `—` | Puncak tak terlacak (event jurnal tanpa data, biasanya histori pra-fix 10 Sep 2026). `0.0` = benar-benar tak pernah profit. Perbedaan dengan angka banner saat running: banner = pips SAAT INI, tabel = PUNCAK historis — bukan bug. |
 
 **Mode simulasi (tanpa MT5):** daemon bisa start, tetapi jalur G4 butuh
 candle M15/H1 live — tanpa MT5 frame kosong dan sinyal di-skip. G4 hanya
