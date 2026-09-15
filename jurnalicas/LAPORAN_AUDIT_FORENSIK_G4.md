@@ -122,4 +122,14 @@ Penyempit terbesar: **L3** (hanya ~21–24% yang lolos) dan **L4** (~38–40%). 
 
 - Definisi L1–L4 (termasuk "CHoCH" yang secara semantik lebih tepet disebut break struktur hibrid) — mengubahnya = strategi baru, butuh tuning + backtest + parity ulang.
 - TP 187,5/375/562,5 pips, Early BE+ off, risk 1% — sesuai instruksi tetap pengguna.
-- Ide varian masa depan (bukan sekarang): umur-sweep < N jam (C2), label L3 dinamis "BOS/CHoCH" di dashboard (C1).
+- Ide varian masa depan (bukan sekarang): umur-sweep < N jam (C2).
+
+## 10. Chart BOS/CHoCH di dashboard (terimplementasi 15 Sep 2026)
+
+Ide §9 ("label L3 dinamis BOS/CHoCH di dashboard") DIEKSEKUSI sebagai fitur visual read-only (`/api/structure` + `g4_structure_events()`):
+
+- **Definisi marker** (mengikuti cara kerja L3): level swing 5-bar M15 `[k-6..k-2]`; BREAK = crossing PERTAMA close M5 terhadap level aktif. Klasifikasi **konvensi struktur ICT**: searah break terakhir = **BOS** (biru), melawan = **CHoCH** (ungu); ⚡ = bar break yang juga menghasilkan sinyal G4.
+- **Statistik setahun** (15.938 event: 12.473 BOS / 3.465 CHoCH): 41,4% bar sinyal G4 menyala **persis di bar break** (1.529 — inilah event ber-⚡, terverifikasi match 100% dengan bar sinyal); sisanya 58,6% menyala di bar lanjutan setelah break (close tetap di luar level aktif) — konsisten dengan karakter continuation temuan C1. NB: klasifikasi chart (flip arah break) adalah sumbu berbeda dari ukuran C1 (swing vs swing sebelumnya); keduanya sahih untuk pertanyaan masing-masing.
+- Level swing M15 **aktif** (belum ditembus) digambar sebagai garis SWH/SWL samar.
+- Jalur trading TIDAK tersentuh (sinyal tetap `g4_signal_at`; fungsi ini murni untuk gambar).
+

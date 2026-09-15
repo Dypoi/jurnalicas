@@ -25,7 +25,8 @@ from config import config
 from src.indicators.sessions import calculate_session_killzones, is_current_in_burst
 from src.execution.mt5_bridge import IcasMT5Bridge
 from src.backtest.engine import IcasBacktestEngine
-from src.strategy.g4_strategy import frames_from_raw, g4_cascade_detail, detect_server_offset_hours
+from src.strategy.g4_strategy import (frames_from_raw, g4_cascade_detail,
+                                      detect_server_offset_hours, g4_structure_events)
 
 app = Flask(__name__, template_folder='../templates')
 
@@ -685,6 +686,41 @@ def api_candles():
             "bear_fvg": is_bear_fvg
         })
     return jsonify(candles)
+
+@app.route('/api/structure')
+def api_structure():
+    """[AUDIT C1 15 Sep 2026] Marker BOS/CHoCH (break struktur M15) untuk chart
+    dashboard — READ-ONLY, tidak menyentuh jalur trading. Waktu dikonversi ke
+    LABEL SERVER MT5 (format sama dengan /api/candles: '%m-%d %H:%M') agar
+    frontend bisa mencocokkan posisi candle; level & klasifikasi dihitung dari
+    frame UTC jalur live (frames_from_raw + offset live)."""
+    tick = bridge.get_current_tick()
+    _srv_off = _server_offset_hours(tick)
+    frames = frames_from_raw(
+        bridge.get_latest_candles("M5", 400),
+        bridge.get_latest_candles("M15", 120),
+        bridge.get_latest_candles("H1", 3000),
+        server_offset_hours=_srv_off)
+    if frames is None:
+        return jsonify({"events": [], "active": None})
+    df_m5, df_m15, df_h1 = frames
+    try:
+        events, active = g4_structure_events(df_m5, df_m15, df_h1, max_events=40)
+    except Exception as e:  # diagram tidak boleh membuat endpoint 500
+        return jsonify({"events": [], "active": None, "error": str(e)})
+    off_h = _srv_off if _srv_off is not None else 0
+
+    def _srv(t):
+        return (t + pd.Timedelta(hours=off_h)).strftime("%m-%d %H:%M")
+
+    evs = [{"time": _srv(e["t"]), "level": round(e["level"], 2), "dir": e["dir"],
+            "kind": e["kind"], "signal": e["signal"]} for e in events]
+    act = None
+    if active and active.get("swing_h") is not None:
+        act = {"time": _srv(active["t"]), "swing_h": round(active["swing_h"], 2),
+               "swing_l": round(active["swing_l"], 2)}
+    return jsonify({"events": evs, "active": act})
+
 
 @app.route('/api/stats')
 def api_stats():

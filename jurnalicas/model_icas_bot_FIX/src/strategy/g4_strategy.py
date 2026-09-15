@@ -368,6 +368,90 @@ def g4_cascade_detail(df_m5: pd.DataFrame, df_m15: pd.DataFrame, df_h1: pd.DataF
     return res
 
 
+def g4_structure_events(df_m5: pd.DataFrame, df_m15: pd.DataFrame, df_h1: pd.DataFrame,
+                        max_events: int = 40, with_signal_flags: bool = True):
+    """[DASHBOARD 15 Sep 2026 — AUDIT C1] Event break struktur M15 (BOS vs CHoCH)
+    untuk digambar di chart dashboard. READ-ONLY visual — TIDAK dipakai jalur
+    trading (sinyal tetap g4_signal_at; lihat LAPORAN_AUDIT_FORENSIK_G4.md §3/C1:
+    57-60% break pada sinyal G4 sebenarnya BOS/continuation, sisanya CHoCH).
+
+    Definisi (mengikuti cara kerja L3, dibaca sebagai event):
+    - Level swing aktif pada bar M5 ke-i = swing 5-bar M15 window posisional
+      [k-6..k-2], k = bar M15 terakhir berlabel <= t_i - 15 menit — REPLIKA
+      persis L3 di g4_signal_at (rolling(5).shift(2)).
+    - BREAK UP   di bar i: close[i] > swing_high aktif (crossing PERTAMA
+      terhadap level aktif itu; level baru => penanda reset).
+    - BREAK DOWN di bar i: close[i] < swing_low aktif  (idem).
+    - Klasifikasi (konvensi struktur pasar ICT):
+        arah break == arah break terakhir -> "BOS"   (continuation)
+        arah break != arah break terakhir -> "CHoCH" (perubahan karakter)
+      Break PERTAMA sejak awal frame -> "CHoCH" (karakter belum terbentuk;
+      konservatif — menandai perubahan dari netral).
+    - Flag `signal`: True bila bar itu juga menghasilkan sinyal G4 searah
+      (L3 memang mensyaratkan break; dihitung via g4_signal_at).
+
+    Return (events, active):
+      events: list dict {t, level, dir('up'/'down'), kind('BOS'/'CHoCH'),
+                         signal(bool)} berurut waktu, maks `max_events` terakhir.
+      active : {t, swing_h, swing_l} level swing yang berlaku di bar terakhir
+               (garis S/R potensial), atau None.
+    """
+    if df_m5 is None or df_m15 is None or len(df_m5) < 12:
+        return [], None
+    idx = df_m5.index
+    close = df_m5["close"].to_numpy(dtype=float)
+
+    # swing M15 — replika L3: rolling(5) shift(2) posisional
+    m15_h = df_m15["high"].to_numpy(dtype=float)
+    m15_l = df_m15["low"].to_numpy(dtype=float)
+    sw_h = pd.Series(m15_h).rolling(5).max().shift(2).to_numpy()
+    sw_l = pd.Series(m15_l).rolling(5).min().shift(2).to_numpy()
+    k_arr = df_m15.index.searchsorted((idx - pd.Timedelta(minutes=15)).values, side="right") - 1
+
+    events: list = []
+    last_dir: Optional[str] = None
+    cur_up_lvl = cur_dn_lvl = None
+    above = below = False          # apakah close sudah di luar level aktif
+    i_start = 1 if with_signal_flags else 0
+    for i in range(len(df_m5)):
+        k = int(k_arr[i])
+        if k < 6 or i < 1:
+            cur_up_lvl = cur_dn_lvl = None
+            above = below = False
+            continue
+        up_lvl, dn_lvl = sw_h[k], sw_l[k]
+        if up_lvl != cur_up_lvl:      # swing high baru -> reset penanda crossing
+            cur_up_lvl, above = up_lvl, False
+        if dn_lvl != cur_dn_lvl:
+            cur_dn_lvl, below = dn_lvl, False
+        c = close[i]
+        ev_dir = None
+        if (not above) and c > up_lvl:
+            above = True
+            ev_dir = "up"
+            lvl = float(up_lvl)
+        elif (not below) and c < dn_lvl:
+            below = True
+            ev_dir = "down"
+            lvl = float(dn_lvl)
+        if ev_dir is None:
+            continue
+        kind = "BOS" if ev_dir == last_dir else "CHoCH"
+        last_dir = ev_dir
+        sig = False
+        if with_signal_flags and df_h1 is not None and i >= i_start:
+            s = g4_signal_at(df_m5, df_m15, df_h1, i)
+            sig = (s == ("BUY" if ev_dir == "up" else "SELL"))
+        events.append({"t": idx[i], "level": lvl, "dir": ev_dir,
+                       "kind": kind, "signal": bool(sig)})
+    active = None
+    k_last = int(k_arr[-1])
+    if k_last >= 6:
+        active = {"t": idx[-1], "swing_h": float(sw_h[k_last]),
+                  "swing_l": float(sw_l[k_last])}
+    return events[-max_events:], active
+
+
 class G4Strategy:
     """Kelas strategi G4 — interface kompatibel ModelIcasStrategy (counter harian,
     can_trade_today, evaluate) sehingga daemon & StateStore tetap bekerja."""
