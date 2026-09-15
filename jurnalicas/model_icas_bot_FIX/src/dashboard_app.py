@@ -47,6 +47,50 @@ try:
 except Exception:
     _ATHENS_TZ = None
 
+# ==================== [TZ-FIX 15 Sep 2026] JAM SERVER DARI OFFSET LIVE ====================
+# Jam server Exness = GMT+0 (FAQ resmi; bukan Europe/Athens UTC+3). Sebelum fix
+# ini, "Server Time" di dashboard diambil dari jam lokal dikonversi ke Athens
+# -> selalu 3 jam LEBIH CEPAT dari jam MT5 user (akar yang sama dengan insiden
+# guard "bar BASI" 14-15 Sep). Kini offset dideteksi dari waktu tick live
+# (detect_server_offset_hours) dan jam server = UTC + offset.
+_SRV_OFFSET_H = None        # jam; None = belum terdeteksi
+_SRV_OFFSET_CHECKED_AT = 0.0
+
+
+def _server_offset_hours(tick):
+    """Offset jam server vs UTC (jam). Refresh dari waktu tick live maksimal
+    1x/jam; di antara refresh memakai nilai cache. None bila belum terdeteksi."""
+    global _SRV_OFFSET_H, _SRV_OFFSET_CHECKED_AT
+    now_e = time.time()
+    if (tick.get("valid") and tick.get("time")
+            and now_e - _SRV_OFFSET_CHECKED_AT >= 3600.0):
+        _off = detect_server_offset_hours(tick.get("time"))
+        if _off is not None:
+            _SRV_OFFSET_CHECKED_AT = now_e
+            _SRV_OFFSET_H = _off
+    return _SRV_OFFSET_H
+
+
+def _server_now(tick):
+    """Jam dinding server broker SEKARANG (datetime naive). None bila belum
+    bisa ditentukan (feed mati sejak startup & epoch tick tak tersedia).
+    Basis: UTC jam mesin + offset terdeteksi — selalu berdetak, tidak ikut
+    membeku saat tick mati (offset terakhir tetap dipakai, seperti MT5 yang
+    jamnya berhenti saat disconnect). Fallback awal: render epoch tick
+    langsung (epoch MT5 = jam dinding server 'seolah UTC')."""
+    off = _server_offset_hours(tick)
+    if off is not None:
+        return (datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+                + datetime.timedelta(hours=off))
+    t = int(tick.get("time") or 0)
+    if t > 0:
+        try:
+            return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).replace(tzinfo=None)
+        except Exception:
+            return None
+    return None
+
+
 ENGINE_VERSION = getattr(config, "ENGINE_VERSION", "icas-v2")
 JOURNAL_FILE = getattr(config, "JOURNAL_FILE", "logs/trade_journal.jsonl")
 EQ_SNAP_S = int(getattr(config, "JOURNAL_EQUITY_SNAPSHOT_SECONDS", 900))
@@ -453,20 +497,26 @@ def index():
 
 @app.route('/api/status')
 def api_status():
-    # [D6-07] Jam server broker dari tz-database Europe/Athens (identik daemon
-    # G4). Fallback ke offset manual lama hanya bila zoneinfo tak tersedia.
+    # [D6-07 → TZ-FIX 15 Sep] Jam server broker dari OFFSET LIVE hasil deteksi
+    # waktu tick (Exness = GMT+0; sebelumnya Europe/Athens = 3 jam lebih cepat
+    # dari jam MT5 sesungguhnya). Fallback: render epoch tick bila offset belum
+    # terdeteksi; "—" bila sama sekali tidak ada.
     now_utc = datetime.datetime.now(datetime.timezone.utc)
-    if _ATHENS_TZ is not None:
-        now_srv = datetime.datetime.now(_ATHENS_TZ)
+    now_srv = _server_now(bridge.get_current_tick())
+    if now_srv is not None:
         server_hour, server_min, server_sec = now_srv.hour, now_srv.minute, now_srv.second
+        server_time_str = f"{server_hour:02d}:{server_min:02d}:{server_sec:02d}"
     else:
-        server_utc_shift = 7 - config.SERVER_TIME_OFFSET_HOURS   # WIB(UTC+7) minus offset WIB->server
-        server_hour = (now_utc.hour + server_utc_shift) % 24
-        server_min = now_utc.minute
-        server_sec = now_utc.second
-    wib_hour = (now_utc.hour + 7) % 24
-    
-    in_burst = is_current_in_burst(server_hour, server_min)
+        server_hour = server_min = server_sec = None
+        server_time_str = "—"
+    wib_now = now_utc + datetime.timedelta(hours=7)
+    wib_hour = wib_now.hour
+
+    # [TZ-FIX 15 Sep] is_current_in_burst memakai konvensi label Athens (jendela
+    # dikalibrasi "10:00-12:00 Server" = 14:00-16:00 WIB; Athens = WIB-4).
+    # Dikonversi dari WIB agar semantik jendela ICT tetap benar untuk broker
+    # GMT+0 apa pun (killzone user NONAKTIF — murni tampilan).
+    in_burst = is_current_in_burst((wib_hour - 4) % 24, wib_now.minute)
     
     active_sessions = []
     if 0 <= wib_hour < 6: active_sessions.append("Late NY / Pacific")
@@ -549,8 +599,8 @@ def api_status():
         "symbol": bridge.resolved_symbol,
         "timeframe": config.TIMEFRAME,
         "macro_timeframe": config.MACRO_TIMEFRAME,
-        "server_time": f"{server_hour:02d}:{server_min:02d}:{server_sec:02d}",
-        "wib_time": f"{wib_hour:02d}:{server_min:02d}:{server_sec:02d}",
+        "server_time": server_time_str,
+        "wib_time": wib_now.strftime("%H:%M:%S"),
         "active_sessions": ", ".join(active_sessions),
         "use_killzone": config.USE_KILLZONE,
         "in_killzone": in_burst,
@@ -652,9 +702,10 @@ def api_tick():
     """[D6-12] Tick SUPER-RINGAN untuk update chart tiap 1 detik (bid/ask/spread/
     jam server) — tanpa beban journal/akun seperti /api/status (tetap 2 dtk)."""
     t = bridge.get_current_tick()
-    srv = None
-    if _ATHENS_TZ is not None:
-        srv = datetime.datetime.now(_ATHENS_TZ).strftime("%H:%M:%S")
+    # [TZ-FIX 15 Sep] jam server = UTC + offset live (Exness = GMT+0; sebelumnya
+    # Europe/Athens -> 3 jam lebih cepat dari jam MT5)
+    _s = _server_now(t)
+    srv = _s.strftime("%H:%M:%S") if _s is not None else None
     return jsonify({
         "bid": t["bid"], "ask": t["ask"],
         "spread_usd": round(t["spread"] * price_point, 2),
@@ -733,10 +784,11 @@ def api_g4_state():
                            "entry": e.get("entry"), "reason": e.get("reason")}
             break
 
-    # countdown ke penutupan bar M5 berikutnya (waktu server Athens)
+    # countdown ke penutupan bar M5 berikutnya (jam server live; hanya
+    # menit:detik yang dipakai sehingga offset-invariant)
     next_close_secs = None
-    if _ATHENS_TZ is not None:
-        now_srv = datetime.datetime.now(_ATHENS_TZ)
+    now_srv = _server_now(tick)
+    if now_srv is not None:
         next_close_secs = 300 - (now_srv.minute * 60 + now_srv.second) % 300
 
     pdh = pdl = ema = None

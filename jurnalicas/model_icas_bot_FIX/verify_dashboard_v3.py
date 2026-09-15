@@ -18,7 +18,8 @@ langsung (tanpa server nyata, tanpa MT5):
   [D6-05] backtest gagal -> negative-cache (engine TIDAK dijalankan ulang tiap
           poll /api/stats).
   [D6-06] run_server memakai threaded=True (UI tidak beku oleh 1 request lambat).
-  [D6-07] jam server = Europe/Athens via tz-database (identik daemon G4).
+  [D6-07] jam server = offset live detect_server_offset_hours (TZ-FIX 15 Sep:
+          Exness = GMT+0, bukan Europe/Athens).
   [D6-08] feed mati (tick invalid/0) -> pos_data fav/pnl = None + alasan,
           bukan pnl ratusan ribu dolar dari harga 0.
   [D6-10] template: esc() dipakai, placeholder login 88921045 dihapus.
@@ -212,18 +213,19 @@ def main():
           captured.get("threaded") is True)
 
     # ------------------------------------------------------------------ D6-07
-    print("\n[D6-07] jam server = Europe/Athens (tz-database, identik daemon G4)")
+    print("\n[D6-07] jam server = offset live (TZ-FIX 15 Sep: Exness GMT+0, bukan Athens)")
     try:
-        from zoneinfo import ZoneInfo
-        ath = ZoneInfo("Europe/Athens")
-        h0 = datetime.datetime.now(ath).hour
         d = client.get("/api/status").get_json()
-        h1 = datetime.datetime.now(ath).hour
+        _srv = dash._server_now(dash.bridge.get_current_tick())
         srv_h = int(d["server_time"][:2])
-        check(f"server_time jam {srv_h} == Athens [{h0}..{h1}]",
-              srv_h in (h0, h1))
+        check(f"server_time jam {srv_h} == offset-live [{None if _srv is None else _srv.hour}]",
+              _srv is not None and srv_h == _srv.hour)
+        _wib_exp_h = (datetime.datetime.now(datetime.timezone.utc)
+                      + datetime.timedelta(hours=7)).hour % 24
+        check(f"wib_time jam {str(d.get('wib_time',''))[:2]} == UTC+7 [{_wib_exp_h}]",
+              int(str(d.get("wib_time", "99"))[:2]) == _wib_exp_h)
     except Exception as e:
-        check(f"zoneinfo tersedia & jam cocok ({e})", False)
+        check(f"jam server offset-live ({e})", False)
 
     # ------------------------------------------------------------------ D6-08
     print("\n[D6-08] feed mati -> fav/pnl None (bukan dari harga 0)")
