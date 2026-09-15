@@ -46,6 +46,12 @@ import pandas as pd
 from config import config
 from src.strategy.icas_strategy import IcasSignal
 
+try:
+    from zoneinfo import ZoneInfo
+    _PD_TZ = ZoneInfo("Europe/Athens")   # [C5-FIX] hari bursa ICT = kalender Athens (NY close)
+except Exception:
+    _PD_TZ = None
+
 
 def detect_server_offset_hours(tick_epoch_seconds, now_epoch_seconds=None) -> Optional[int]:
     """[TZ-FIX 15 Sep 2026] Offset jam server MT5 terhadap UTC (dalam JAM),
@@ -155,13 +161,33 @@ def _h1_ema_at(df_h1: pd.DataFrame, t_i: pd.Timestamp, ema_span: int = 200,
 
 
 def _pd_levels(df_m5: pd.DataFrame, t_i: pd.Timestamp) -> Optional[Tuple[float, float]]:
-    """PDH/PDL = high/low HARI BURSA terakhir yang berlabel <= t_i - 24 jam
-    (hari UTC dari bar M5; weekend otomatis ter-pad ke hari bursa terakhir —
-    identik resample("1D").dropna() + _map_htf(dur="1D") riset).
+    """PDH/PDL = high/low HARI BURSA terakhir yang berlabel <= t_i - 24 jam.
+    [C5-FIX 15 Sep 2026 — AUDIT FORENSIK G4] Pengelompokan hari memakai KALENDER
+    ATHENS (Europe/Athens), BUKAN kalender label frame. Alasan: hari Athens
+    berpatok ke tengah malam EET/EEST = tepat 17:00 New York (NY close) —
+    inilah definisi "hari bursa" ICT DAN konvensi data riset yang menghasilkan
+    +$4.493 (research: M1 UTC -> tz_convert(Europe/Athens) -> resample("1D")).
+    Frame live berlabel UTC (server Exness GMT+0): kalender UTC memotong hari
+    di 00:00 UTC (3 jam SETELAH NY close) sehingga PDH/PDL live bisa berbeda
+    dari backtest. Dengan pengelompokan Athens di sini, live = riset untuk
+    broker zona waktu APA PUN. (Bukti ukur divergensi pra-fix: lihat
+    research/g4_funnel_audit.py — LAPORAN_AUDIT_FORENSIK_G4.md temuan C5.)
+    Weekend otomatis ter-pad ke hari bursa terakhir — identik
+    resample("1D").dropna() + _map_htf(dur="1D") riset.
     Return (pd_high, pd_low) atau None bila belum ada hari sebelumnya."""
-    days = df_m5.index.normalize()
+    if _PD_TZ is None:   # zoneinfo tak tersedia — fallback perilaku lama
+        days = df_m5.index.normalize()
+        uniq = days.unique()
+        pos = uniq.searchsorted(pd.Timestamp(t_i) - pd.Timedelta(hours=24), side="right") - 1
+        if pos < 0:
+            return None
+        day_mask = days == uniq[pos]
+        return float(df_m5["high"][day_mask].max()), float(df_m5["low"][day_mask].min())
+    ath_idx = df_m5.index.tz_localize("UTC").tz_convert(_PD_TZ).tz_localize(None)
+    days = ath_idx.normalize()
+    t_ath = pd.Timestamp(t_i).tz_localize("UTC").tz_convert(_PD_TZ).tz_localize(None)
     uniq = days.unique()
-    pos = uniq.searchsorted(pd.Timestamp(t_i) - pd.Timedelta(hours=24), side="right") - 1
+    pos = uniq.searchsorted(t_ath - pd.Timedelta(hours=24), side="right") - 1
     if pos < 0:
         return None
     day_mask = days == uniq[pos]

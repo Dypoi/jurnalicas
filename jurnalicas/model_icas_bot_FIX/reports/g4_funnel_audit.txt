@@ -1,0 +1,53 @@
+==============================================================================
+AUDIT FUNNEL KASKADE G4 — setahun penuh, frame UTC (jalur live)
+==============================================================================
+Memuat M1 (warm-up 330 hari + setahun) ...
+  134,882 bar M5  2024-10-06 19:00:00 .. 2026-09-01 17:55:00
+  jendela audit: bar 63754..134881 (2025-08-31 21:00:00 ..) = 71,128 bar
+  L1: EMA200-H1 (cache per slot) ...
+  L2: PDH/PDL dua mode pengelompokan hari + sweep 288 bar ...
+  L3: swing M15 ...
+  VALIDASI: funnel vektor == g4_signal_at (sampel + semua bar sinyal) ...
+  validasi: 5,329 bar dicek, mismatch = 0
+
+==============================================================================
+[1] FUNNEL KASKADE — 71,128 bar M5 tertutup (setahun)
+==============================================================================
+  BUY: L1 bias      :  42,845  ( 60.24%)
+       L1+L2 sweep   :  25,978  ( 36.52%)  [60.6% dari L1]
+       L1+L2+L3 choch :   6,165  (  8.67%)  [23.7% dari L1+L2]
+       SEMUA (sinyal) :   2,457  (  3.45%)  [39.9% dari L1+L2+L3]
+  SELL: L1 bias      :  28,283  ( 39.76%)
+        L1+L2 sweep   :  16,117  ( 22.66%)  [57.0% dari L1]
+        L1+L2+L3 choch :   3,293  (  4.63%)  [20.4% dari L1+L2]
+        SEMUA (sinyal) :   1,237  (  1.74%)  [37.6% dari L1+L2+L3]
+  TOTAL sinyal geometri: 3,694 (15.2/hari bursa) — setelah guard spread $1.20 & batasan eksekusi engine → 1.338 trade (5,5/hari; laporan tuning: WR 73,0%, PF 1,12, +$4.493)
+
+==============================================================================
+[2] KARAKTER SWEEP L2 PADA BAR SINYAL (mode Athens = riset)
+==============================================================================
+  n = 3,694 sinyal
+  umur sweep saat sinyal : median 142 bar (11.8 j), maks 288 bar (24.0 j), <1 jam: 12.6%
+  wick-only (close kembali ke sisi level di bar sentuh): 93.9%  (close-through: 6.1%)
+  reclaim di bar sinyal (close sudah kembali melintasi level): 95.1%
+  KEDUA sisi sweep menyala bersamaan di bar sinyal: 79.6%
+  kedalaman sweep median: $0.00 (P90 $5.90)
+
+==============================================================================
+[3] KARAKTER CHoCH M15 PADA BAR SINYAL (konteks swing sebelumnya)
+==============================================================================
+  BUY  (n=2,457): swing-high LEBIH TINGGI dari swing sebelumnya (continuation/BOS): 59.7%
+        swing-high lebih RENDAH (reversal/karakter CHoCH murni): 40.3%
+  SELL (n=1,237): swing-low LEBIH RENDAH (continuation/BOS): 56.9%
+        swing-low lebih TINGGI (reversal/karakter CHoCH murni): 43.1%
+
+==============================================================================
+[4] DIVERGENSI PENGELOMPOKAN HARI: lama (kalender label/UTC) vs baru (Athens = riset)
+==============================================================================
+  bar dengan PDH/PDL berbeda antar mode        : 54,625 (76.8% bar)
+  bar dengan HASIL SINYAL berbeda               : 810 (1.14% bar)
+  sinyal mode Athens (riset = backtest +$4.493) : 3,694
+  sinyal mode label (live pra-fix C5)           : 3,872
+  sinyal yang SAMA di kedua mode                : 3,378 (91.4% dari sinyal riset)
+
+KESIMPULAN PENGUKURAN: lihat LAPORAN_AUDIT_FORENSIK_G4.md (temuan C1..C5).

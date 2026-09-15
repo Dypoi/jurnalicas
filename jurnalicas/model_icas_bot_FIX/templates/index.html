@@ -233,7 +233,7 @@
                         </tbody>
                     </table>
                     <div class="info-row"><span class="info-label">Bar M5 tutup dalam</span><span class="info-val val-gold" id="m5-countdown">--:--</span></div>
-                    <div class="info-row"><span class="info-label">Sinyal terakhir</span><span class="info-val" id="last-signal">—</span></div>
+                    <div class="info-row"><span class="info-label">Sinyal terakhir (riwayat)</span><span class="info-val" id="last-signal">—</span></div>
                 </div>
 
                 <!-- Protocol Rules (D-02: semua nilai DINAMIS dari engine aktif — tak ada hardcode legacy) -->
@@ -669,8 +669,17 @@
 
                 const ls = document.getElementById('last-signal');
                 if (d.last_signal) {
-                    ls.innerHTML = '<span class="' + (d.last_signal.type === 'BUY' ? 'val-green' : 'val-red') + '">' + esc(d.last_signal.type) + '</span> @ ' + esc((d.last_signal.ts || '').slice(5, 16).replace('T', ' '));
-                    ls.title = d.last_signal.reason || '';
+                    // [AUDIT C3 15 Sep] panel ini = RIWAYAT eksekusi terakhir dari jurnal
+                    // (bukan sinyal aktif/menunggu) — tampilkan umur relatif agar tidak
+                    // terbaca sebagai sinyal yang masih dipakai.
+                    let ageTxt = '';
+                    const tSig = new Date(d.last_signal.ts);
+                    if (!isNaN(tSig)) {
+                        const mins = Math.max(0, Math.round((Date.now() - tSig.getTime()) / 60000));
+                        ageTxt = mins < 60 ? ` · ${mins}m lalu` : ` · ${Math.round(mins / 60)}j lalu`;
+                    }
+                    ls.innerHTML = '<span class="' + (d.last_signal.type === 'BUY' ? 'val-green' : 'val-red') + '">' + esc(d.last_signal.type) + '</span> @ ' + esc((d.last_signal.ts || '').slice(5, 16).replace('T', ' ')) + esc(ageTxt);
+                    ls.title = (d.last_signal.reason || '') + ' — riwayat eksekusi terakhir (sinyal dievaluasi segar tiap bar M5 tertutup; tidak ada sinyal menggantung).';
                 } else { ls.innerText = '—'; ls.title = ''; }
             } catch (e) { console.error('fetchG4State err:', e); }
         }
