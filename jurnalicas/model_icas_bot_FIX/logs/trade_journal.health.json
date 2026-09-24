@@ -1,0 +1,1 @@
+{"ts": "2026-09-22T11:03:12", "engine_version": "icas-v3-g4 (MTF H1/PD24j/M15/M5 + trail 50/30, 09 Sep 2026)", "journal": {"enabled": true, "path": "logs/trade_journal.jsonl", "written_count": 277, "error_count": 0, "last_error": "", "degraded": false}, "feed_valid": false, "feed_reason": "no_tick", "m5_age_seconds": null, "terminal_healthy": false, "open_tickets": []}
