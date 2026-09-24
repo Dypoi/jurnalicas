@@ -87,6 +87,42 @@ Total uptime hilang ≈ 3,5 dari 13 hari kalender ≈ **25%**. Dengan SL di brok
 
 ---
 
+## 7. Evaluasi strategi lintas periode — seberapa besar SEBENARNYA edge G4? (revisi 24 Sep siang)
+
+Pertanyaan pemilik akun *"secara strategi ga perlu di evaluasi emang?"* menuntut jawaban yang lebih jujur dari §6. Data uji lintas periode SUDAH ADA di repo (reports/tuning_scalpmtf_2021-2022 & 2022-2023, eksekusi M5, risk $100 — dibuat saat riset awal) dan hasilnya menyempurnakan verdict:
+
+| Periode | Trades | WR | AvgWin/AvgLoss | PF | Net/tahun |
+|---|---|---|---|---|---|
+| 2021–2022 | 373 | 73,19% | +$36,49 / −$105 | **0,95** | **−$537** |
+| 2022–2023 | 385 | 74,29% | +$37,11 / −$105 | **1,02** | +$219 |
+| 2025–2026 (basis keputusan) | 1.338 | 73,02% | +$43,40 / −$105 | **1,12** | +$4.493 |
+| **Live era bersih (minggu ini)** | 27 | 48,1% | +$41,31 / −$105 | 0,54 | −$934/6 hari |
+
+**Dua fakta besar dari tabel ini:**
+
+1. **Mekanika WR-nya sangat robust** — 73–74% di ketiga periode yang sangat berbeda (emas $1.800-an choppy 2021-23 vs bull-run $3.400→$5.600 di 2025-26). Win rate ~73% adalah properti GEOMETRI exit (trailing 50/30), bukan kebetulan periode.
+2. **Tapi edge-nya TIPIS dan bergantung regime.** Titik impas mekanik: WR_be = 1/(1+avgWin/avgLoss). Periode 2021-22: BE = 74,2% — aktual 73,2% di BAWAHNYA → rugi (PF 0,95 ✓). 2022-23: BE = 73,9% vs aktual 74,3% → impas. 2025-26: BE = 70,7% vs aktual 73,0% → untung. **Seluruh edge G4 hidup dalam ~2–3 poin win rate di atas titik impasnya sendiri** — dan avgWin lebih besar di 2025-26 (volatilitas $ lebih tinggi) itulah yang menurunkan BE. Minggu live ini: BE = 71,8% vs aktual 48,1% → PF 0,54, konsisten matematis.
+
+**Konsekuensi jujur untuk ekspektasi:** angka +$4.493/thn adalah **tahun terbaik dari tiga yang diuji**, bukan rata-rata. Rata-rata lintas periode ≈ +$1.400/thn dengan dua dari tiga periode ≈ impas. Minggu merah −$934 sepenuhnya kompatibel dengan profil itu. (Kegagalan minggu ini pun tetap BUKAN bukti bug — §1–§4 tetap berlaku: eksekusi identik, loss salah-arah-murni, masih dalam pengalaman rolling backtest.)
+
+**Kejujuran statistik tambahan:** bila outcome dianggap iid, P(≤13W dari 27 | WR 73%) = **0,53%** — tampak "mustahil". Tapi iid terbantahkan oleh data backtest sendiri (ada jendela 27-trade di 44,4%, 9 jendela ≤48,1% — outcome menggerombol per regime). Uji yang benar adalah rolling (dipakai di §4), dan itu berkata: *dalam pengalaman, di ekor*. Dengan n=27, keduanya tak bisa dipilah — makanya perlu n lebih besar, bukan kesimpulan cepat.
+
+### Tripwire evaluasi strategi (disepakati SEKARANG, dijalankan apa adanya — mencegah utak-atik di tengah emosi)
+
+| Pemicu (era bersih, semua posisi tertutup) | Tindakan |
+|---|---|
+| n ≥ 100 dan WR ≥ 71% | Sistem sesuai desain — lanjut; pertimbangkan real/VPS |
+| n ≥ 100 dan WR 64–71% | Edge hilang/tipis — **evaluasi strategi formal** (bukan tweak parameter): uji ulang OOS, pertimbangkan varian teruji lain (lihat bawah) |
+| n ≥ 100 dan WR < 64% (≈ PF < 0,85) | **Stop & evaluasi total** — jangan tambah eksposur |
+| Drawdown > 20% dari puncak (batas desain backtest) | Stop & evaluasi |
+| Loss beruntun ≥ 10 | Evaluasi (7 sekarang, backtest maks 5) |
+
+**Kandidat alternatif yang SUDAH teruji** (bila tripwire menyala — jangan sekarang): varian **V7T/V7E** (G4 + filter tren SMA200/EMA200-harian): PF 1,95–2,04, ekspektasi $26–29/trade (vs $3,36), signifikan vs 32 baseline acak (p ≤ 0,031) — tapi hanya 45–49 trade/thn dan diuji di tahun yang sama dengan tuning G4 (bias seleksi in-sample belum dikeluarkan; wajib uji lintas periode dulu bila dipakai).
+
+**Yang TIDAK berubah dari §6:** jangan ubah parameter di tengah jalan; lanjut demo; evaluasi ulang dengan evaluator yang sama begitu n era-bersih ≥ 60–100.
+
+---
+
 ## LAMPIRAN — 27 trade era bersih (16–22 Sep)
 
 ```
