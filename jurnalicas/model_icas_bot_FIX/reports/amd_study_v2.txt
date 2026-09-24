@@ -1,0 +1,36 @@
+====================================================================================================
+ STUDI AMD v2 — implementasi SETIA spec pemilik akun (SL struktural + RR 1:2/1:3)
+ Akumulasi: dinamis 3j (<=0.8 ATR14-H1) / Asia 03-07 | sweep | konfirmasi FVG/CISD/REJ
+ SL luar ekstrem sweep | TP 2R penuh / split 2R+3R | timeout 24j | risk $100 | pesimis
+====================================================================================================
+
+### PERIODE 2021-09-01 .. 2022-09-01
+    71,426 bar M5  2021-09-01 00:00:00 .. 2022-09-01 20:55:00
+  dinamis/2r     n= 271  WR= 19.9%  avgR=-0.40  net=$  -10900  PF=0.50  maxDD=$ -10900  medHold=8bar   [konfirmasi: {'FVG': 4, 'CISD': 196, 'REJ': 71}, skipR: 0]
+  dinamis/split  n= 265  WR= 15.5%  avgR=-0.42  net=$  -11250  PF=0.48  maxDD=$ -11350  medHold=9bar   [konfirmasi: {'FVG': 4, 'CISD': 192, 'REJ': 69}, skipR: 0]
+  asia/2r        n= 252  WR= 21.0%  avgR=-0.37  net=$   -9300  PF=0.53  maxDD=$  -9700  medHold=7bar   [konfirmasi: {'FVG': 16, 'CISD': 186, 'REJ': 50}, skipR: 1]
+  asia/split     n= 252  WR= 16.3%  avgR=-0.39  net=$   -9754  PF=0.51  maxDD=$ -10154  medHold=8bar   [konfirmasi: {'FVG': 16, 'CISD': 186, 'REJ': 50}, skipR: 1]
+
+### PERIODE 2022-09-01 .. 2023-09-01
+    71,168 bar M5  2022-09-01 00:00:00 .. 2023-09-01 20:55:00
+  dinamis/2r     n= 298  WR= 25.5%  avgR=-0.23  net=$   -7000  PF=0.68  maxDD=$  -7600  medHold=7bar   [konfirmasi: {'FVG': 9, 'CISD': 223, 'REJ': 66}, skipR: 1]
+  dinamis/split  n= 288  WR= 18.4%  avgR=-0.27  net=$   -7850  PF=0.63  maxDD=$  -8350  medHold=9bar   [konfirmasi: {'FVG': 8, 'CISD': 214, 'REJ': 66}, skipR: 1]
+  asia/2r        n= 249  WR= 24.9%  avgR=-0.25  net=$   -6300  PF=0.66  maxDD=$  -7200  medHold=6bar   [konfirmasi: {'FVG': 18, 'CISD': 188, 'REJ': 43}, skipR: 1]
+  asia/split     n= 249  WR= 19.3%  avgR=-0.27  net=$   -6800  PF=0.64  maxDD=$  -7700  medHold=7bar   [konfirmasi: {'FVG': 18, 'CISD': 187, 'REJ': 44}, skipR: 1]
+
+### PERIODE 2025-09-01 .. 2026-09-01
+    71,128 bar M5  2025-09-01 00:00:00 .. 2026-09-01 20:55:00
+  dinamis/2r     n= 136  WR= 30.1%  avgR=-0.10  net=$   -1300  PF=0.86  maxDD=$  -3500  medHold=5bar   [konfirmasi: {'FVG': 11, 'CISD': 88, 'REJ': 37}, skipR: 4]
+  dinamis/split  n= 136  WR= 22.8%  avgR=-0.13  net=$   -1801  PF=0.81  maxDD=$  -3651  medHold=6bar   [konfirmasi: {'FVG': 11, 'CISD': 88, 'REJ': 37}, skipR: 4]
+  asia/2r        n= 233  WR= 30.5%  avgR=-0.09  net=$   -2000  PF=0.88  maxDD=$  -3200  medHold=5bar   [konfirmasi: {'FVG': 31, 'CISD': 149, 'REJ': 53}, skipR: 10]
+  asia/split     n= 233  WR= 23.2%  avgR=-0.13  net=$   -2980  PF=0.82  maxDD=$  -4430  medHold=7bar   [konfirmasi: {'FVG': 30, 'CISD': 150, 'REJ': 53}, skipR: 10]
+
+### RINGKASAN STABILITAS (net $ per periode)
+  konfigurasi         2021-22    2022-23    2025-26      TOTAL  stabil?
+  dinamis/2r           -10900      -7000      -1300     -19200  tidak
+  dinamis/split        -11250      -7850      -1801     -20901  tidak
+  asia/2r               -9300      -6300      -2000     -17600  tidak
+  asia/split            -9754      -6800      -2980     -19535  tidak
+
+CATATAN: grid 4 konfigurasi diuji terbuka (semua dilaporkan) — konfigurasi 'menang'
+wajib positif di KETIGA periode agar layak dibahas; selain itu = tidak layak.

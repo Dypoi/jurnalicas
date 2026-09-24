@@ -42,3 +42,31 @@
 Catatan metodologi: konsep dirumuskan 24 Sep 2026 dan diuji pada data historis → 2021–23 relatif bersih, 2025–26 in-sample-ish; tetap hasil NEGATIF hampir di mana-mana, sehingga kesimpulan "tidak layak" kuat (tidak ada risiko cherry-picking positif).
 
 Bila ingin strategi tambahan yang terukur: kandidat yang lebih menjanjikan tetap **V7T/V7E** (G4 + filter tren harian; PF 1,95–2,04, signifikan vs 32 baseline acak) — dengan syarat validasi lintas periode dulu (belum pernah diuji di 2021–23).
+
+
+---
+
+# TAMBAHAN 24 Sep sore — v2: IMPLEMENTASI SETIA SPEC PEMILIK AKUN
+
+Setelah pemilik akun menunjukkan spesifikasi AMD lengkapnya, terbukti v1 di atas menguji varian yang BERBEDA (exit G4). v2 mengimplementasikan spec apa adanya: **akumulasi dinamis** (range 3 jam ≤ 0,8×ATR14-H1) atau **range Asia**, sweep, konfirmasi **FVG/CISD/rejection**, **SL struktural** di luar ekstrem sweep, **TP 1:2 / split 1:2+1:3**, timeout 24 jam, risk $100, pesimis (SL dulu bila sebar). Skrip: `research/amd_study_v2.py` · angka: `reports/amd_study_v2.txt`.
+
+## Hasil v2 — 4 konfigurasi × 3 periode (net $)
+
+| Konfigurasi | 2021–22 | 2022–23 | 2025–26 | Total | n |
+|---|---|---|---|---|---|
+| dinamis / TP 2R | −10.900 | −7.000 | −1.300 | **−19.200** | 705 |
+| dinamis / split 2R+3R | −11.250 | −7.850 | −1.801 | **−20.901** | 689 |
+| asia / TP 2R | −9.300 | −6.300 | −2.000 | **−17.600** | 734 |
+| asia / split 2R+3R | −9.754 | −6.800 | −2.980 | **−19.535** | 734 |
+
+WR 16–30% — di bawah titik impas 33,3% yang dituntut exit RR 1:2 (lagi pula timeout & spread menambah friksi). **Tidak ada satu pun konfigurasi positif di satu pun periode.** (Konfirmasi dominan CISD ~70% — filter paling lemah dari tiganya.)
+
+## Addendum: apakah bias H1 bisa menyelamatkannya?
+
+Filter tambahan "hanya trade searah EMA200-H1" (replika L1 G4) memang MEMPERBAIKI AMD di semua sel (mis. asia/2R: −9.300→−2.400; −2.000→−100) — tapi hasil terbaiknya tetap PF 0,98 (impas), tidak pernah positif.
+
+## Kesimpulan final (v1 + v2 + addendum)
+
+Ide "manipulasi → distribusi" **tidak menghasilkan edge yang dapat ditagih di XAUUSD** dalam bentuk apa pun yang diuji: exit trailing (v1), exit RR sesuai spec (v2), dengan/tanpa bias H1 — 12+ konfigurasi, 3 periode, ~2.100 trade total, semuanya ≤ impas. Yang membuat G4 tetap hidup bukan sekadar "sweep + pembalikan", melainkan **konjungsi penuh kaskade**: sweep level HARI SEBELUMNYA (PDH/PDL, bukan range Asia) + break struktur M15 searah + displacement/FVG M5 + bias H1 + exit trailing yang dikalibrasi ke distribusi pergerakan aktual sinyal itu. Komponen AMD yang "benar" sudah ada di dalam G4; menambahkan AMD sebagai strategi terpisah hanya menambah ekspektasi negatif.
+
+Alternatif yang MASIH layak diuji suatu saat (bukan sekarang): AMD sebagai *filter waktu* untuk G4 (mis. menahan entry G4 pada jam-jam tertentu) — beda pertanyaan, butuh studi tersendiri.
