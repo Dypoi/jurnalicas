@@ -267,6 +267,19 @@ def signal_at(m5: pd.DataFrame, i: int, cfg: StratCfg) -> str | None:
     ssl = min(row["asian_low"], row["london_low"])
 
     mode = getattr(cfg, "signal_mode", "choch") or "choch"
+    if mode == "amd":
+        # ---- [STUDI AMD 24 Sep 2026] Accumulation-Manipulation-Distribution:
+        # kolom amd_buy/amd_sell pra-hitung (research/amd_study.py) — kausal,
+        # maks 1 sinyal per arah per hari. Guard spread/sesi di atas tetap
+        # berlaku. Lihat research/amd_study.py untuk definisi lengkap.
+        if "amd_buy" not in m5.columns or "amd_sell" not in m5.columns:
+            raise ValueError("signal_mode='amd' membutuhkan kolom amd_buy/amd_sell "
+                             "(lihat research/amd_study.py)")
+        if row["amd_buy"]:
+            return "BUY"
+        if row["amd_sell"]:
+            return "SELL"
+        return None
     if mode == "cisd":
         if "cisd_bull" not in m5.columns or "cisd_bear" not in m5.columns:
             raise ValueError("signal_mode='cisd' membutuhkan kolom cisd_bull/cisd_bear "

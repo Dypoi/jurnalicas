@@ -86,31 +86,19 @@ Penyempit terbesar: **L3** (hanya ~21–24% yang lolos) dan **L4** (~38–40%). 
 
 **Live 10–14 Sep: 20 trade / 3 hari bursa = 6,7/hari** — konsisten dengan laju backtest (sedikit lebih tinggi karena 11 re-entry candle-sama yang kini diblokir guard paritas `7d243d4`). **Kesimpulan: gating menghasilkan frekuensi sehat; tidak perlu dilonggarkan.** Setiap pelonggaran = keluar dari wilayah teruji.
 
-## 7. C5 — TEMUAN UTAMA AUDIT INI: definisi "hari" PD levels live ≠ backtest
+## 7. C5 — TEMUAN UTAMA AUDIT: definisi "hari" PD levels live vs backtest *(KOREKSI 24 Sep — baca lengkap)*
 
-**Kronologi penemuan (dari kekhawatiran #2 "sweep berbasis ekstrem 24 jam"):**
+**Koreksi penting 24 Sep 2026:** klaim awal C5 bahwa pipeline riset mengelompokkan hari per **kalender Athens (NY-close)** adalah **MISDIAGNOSIS**. Verifikasi empiris menyusul (replika persis `_map_htf(dur="1D")` cocok 0/16.164 bar; bar Minggu pertama data berlabel 22:00 = pembukaan Exness dalam UTC): pipeline riset **membiarkan label data = UTC** (hanya kolom `srv_*` yang dikonversi ke Athens), sehingga `resample("1D")` riset mengelompokkan hari per **KALENDER UTC murni** (batas 00:00 UTC).
 
-- Pipeline riset: M1 UTC → dikonversi ke **Europe/Athens** → `resample("1D")` → hari Athens. Tengah malam Athens = **tepat 17:00 New York** (NY close) — inilah hari bursa ICT.
-- Jalur live: frame berlabel UTC → `_pd_levels` lama mengelompokkan hari per **kalender label frame**. Pra-TZ-FIX: batas hari 03:00 UTC; pasca-TZ-FIX: 00:00 UTC. **Keduanya ≠ 21:00/22:00 UTC (midnight Athens).**
-- Akibat: PDH/PDL live dihitung dari "hari" yang memotong 3 jam di tempat berbeda → level berbeda → sweep L2 berbeda dari backtest. Parity check lama tidak menangkapnya karena kedua sisi diberi frame berlabel SAMA (Athens) — jalur labeling live sesungguhnya tidak pernah diuji.
+Kronologi lengkap temuan ini:
+- **Pra-TZ-FIX (10–15 Sep pagi):** live mengonversi candle ke label Athens (asumsi server salah) → kalender label = Athens ≠ kalender UTC riset → **misalignment 3 jam yang nyata** di era itu.
+- **TZ-FIX (15 Sep 10:46 UTC):** frame live menjadi berlabel UTC sejati → kalender label = kalender UTC = **otomatis persis riset**. Pada titik ini paritas sebenarnya SUDAH tercapai.
+- **"Fix" C5 (15 Sep 17:46 UTC):** karena misdiagnosis, `_pd_levels` diubah ke kalender Athens + frame parity check digeser — dua perubahan yang **saling menutupi** di Pass A (0 mismatch yang menyesatkan) dan membuat **era-bersih live (15 Sep 17:58 – 22 Sep 11:03) menyimpang 3 jam dari backtest** untuk sinyal-sinyal yang sensitif L2.
+- **KOREKSI (24 Sep):** `_pd_levels` dikembalikan ke kalender label frame (= UTC pasca-TZ-FIX = riset), penggeseran frame di parity check dicabut, dan parity check DIJALANKAN ULANG: **PASS A–D 0 mismatch** pada 71.128 bar — kini tanpa kesalahan yang saling menutupi.
 
-**Ukuran divergensi (setahun, pra-fix):**
+Angka divergensi di §4 laporan funnel (76,8% bar PDH/PDL beda antarmode, 810 bar sinyal beda) tetap benar SEBAGAI ukuran mode-vs-mode; interpretasinya yang dikoreksi: mode yang cocok dengan riset adalah **kalender label/UTC**, bukan Athens.
 
-| Metrik | Nilai |
-|---|---|
-| Bar dengan PDH/PDL berbeda (vs riset) | 54.625 bar (**76,8%**) |
-| Bar dengan hasil sinyal berbeda | 810 bar (1,14%) |
-| Sinyal riset yang **terlewat** live | 316 dari 3.694 (8,6%) |
-| Sinyal live yang **tidak pernah diuji** backtest | 494 |
-
-**Implikasi untuk jurnal 10–14 Sep:** +$308 terjadi dengan definisi hari yang tidak persis backtest — secara paritas murni, sebagian sinyal itu berada di luar himpunan teruji. (Pernyataan "16W/4L konsisten ekspektasi G4" tetap sahih secara statistik, tapi bukan paritas eksak.)
-
-**Fix (`_pd_levels`, commit ini):** pengelompokan hari kini memakai **kalender Athens (NY close) dikonversi dari label UTC** — identik riset untuk broker zona waktu apa pun, tahan DST, tanpa mengubah guard berbasis jam (usia bar, re-entry) yang memang memakai UTC sejati.
-
-**Bukti:**
-- `research/g4_parity_check.py` diperbarui agar menguji frame **berlabel UTC (jalur live sebenarnya)** → **PASS A/B/C/D: 0 mismatch** pada 71.128 bar (3.694 sinyal identik, anchor/SL/lot OK, burn-in EMA $0,000000).
-- `research/g4_funnel_audit.py`: implementasi vektor funnel diverifikasi identik dengan `g4_signal_at` pada 5.329 bar (sampel acak + semua bar sinyal) — 0 mismatch.
-- Dashboard `g4_cascade_detail` memakai `_pd_levels` yang sama → otomatis konsisten.
+**Pembelajaran proses:** dua kesalahan yang berkebalikan di dua sisi perbandingan menghasilkan "0 mismatch" palsu — verifikasi semantik harus dilakukan pada SUMBER (replika eksak fungsi riset), bukan hanya pada hasil akhir perbandingan.
 
 ## 8. Tindakan yang diperlukan pemilik akun
 

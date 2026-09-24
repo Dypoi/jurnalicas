@@ -90,24 +90,20 @@ def load_year_m5() -> pd.DataFrame:
 def build_live_frames(m5: pd.DataFrame):
     """Frame 'live' (identik frames_from_raw dari candle broker):
     df_m5 = OHLC M5; df_m15 = high/low 15min bursa; df_h1 = close per jam bursa.
-    [C5-FIX 15 Sep] Label dikonversi Athens -> UTC persis seperti frames_from_raw
-    di daemon live (baris terakhir tetap berjalan? — TIDAK: sinyal dievaluasi
-    pada bar tertutup, jadi di sini TIDAK dibuang; pemanggil memotong frame
-    s/d bar i). Konversi ini penting agar parity check menguji jalur labeling
-    live yang sebenarnya: _pd_levels mengelompokkan hari per kalender Athens
-    (NY close) dari label UTC — bukan per kalender label frame."""
+    [C5-KOREKSI 24 Sep 2026] Label data riset SUDAH UTC (load_m1 tidak
+    menggeser index — diverifikasi empiris: replika _map_htf cocok 0/16.164
+    bar; bar Minggu pertama 22:00 = pembukaan Exness dalam UTC). Maka frame
+    dikembalikan APA ADANYA — persis seperti frames_from_raw live pasca-
+    TZ-FIX (label UTC sejati). Pergeseran Athens->UTC yang pernah ditambahkan
+    di sini (bersama 'fix' kalender-Athens _pd_levels, 15 Sep) adalah
+    misdiagnosis dan sudah dicabut; keduanya saling menutupi di Pass A
+    sehingga 0 mismatch saat itu menyesatkan."""
     df_m5 = m5[["open", "high", "low", "close"]].copy()
     m15 = m5.resample("15min", label="left", closed="left").agg(
         high=("high", "max"), low=("low", "min")).dropna()
     h1 = m5["close"].resample("1h", label="left", closed="left").last().dropna()
     df_h1 = h1.to_frame("close")
-
-    def _to_utc(df: pd.DataFrame) -> pd.DataFrame:
-        df = df.copy()
-        df.index = df.index.tz_localize("Europe/Athens").tz_convert("UTC").tz_localize(None)
-        return df
-
-    return _to_utc(df_m5), _to_utc(m15), _to_utc(df_h1)
+    return df_m5, m15, df_h1
 
 
 def main() -> int:

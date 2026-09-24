@@ -35,6 +35,8 @@ Kronologi restart vs tanggal commit menunjukkan **era bersih dimulai 15 Sep 17:5
 | 14 Sep 23:16 – 15 Sep 17:58 | **BUG TZ aktif** (asumsi Athens vs server GMT+0) | **0 trade** — 132 bar dibuang `signal_skipped_stale` (12/jam × 11 jam). 1 hari bursa hilang. |
 | 15 Sep 17:58 – 22 Sep 11:03 | **Semua fix aktif** (TZ + C5 + re-entry + SL re-anchor) | 27 trade, −$934,12 ← *era yang dievaluasi di sini* |
 
+**ERRATUM (24 Sep sore):** tabel versi di atas ternyata melewatkan satu nuansa yang ditemukan saat studi AMD: era bersih (15 Sep 17:58–22 Sep 11:03) berjalan dengan "fix C5" berupa pengelompokan hari PD levels kalender **Athens** — kemudian terbukti MISDIAGNOSIS (riset memakai kalender UTC; lihat LAPORAN_AUDIT_FORENSIK_G4.md §7 koreksi). Dampak: sebagian kecil sinyal era bersih yang sensitif terhadap PDH/PDL (L2) berbeda dari himpunan backtest; L1/L3/L4 tidak terdampak. Koreksi sudah di-commit 24 Sep (parity 0 mismatch ulang); daemon perlu restart setelah `git pull`. Angka-angka evaluasi lain (eksekusi, max_fav, rekonsiliasi) tidak berubah.
+
 Bukti sistem hidup di era bersih: `server_clock_offset` 5× (UTC+0 ✓), `signal_skipped_reentry` 1× (18 Sep 02:31, SELL bar 17 Sep 19:25 — guard paritas bekerja), `sl_reanchor` 6× (16–17 Sep — proteksi deviasi SL bekerja), stale-skip turun dari 12/jam → ~2/hari (sisa = koneksi riil, normal), `max_fav` terekam 37/37 trade (fix MF-01 bekerja), rekonsiliasi exact, 1 `order_failed` (17 Sep 19:30 — jam-jam sibuk; satu entry terlewat).
 
 ## 2. Anatomi 27 trade era bersih
