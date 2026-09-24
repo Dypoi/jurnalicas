@@ -1,0 +1,101 @@
+==============================================================================
+EVALUASI JURNAL LIVE — /home/user/jurnalicas/jurnalicas/model_icas_bot_FIX/logs/trade_journal.jsonl
+  baris: 3,794 | event terbaca: 2,940 | rusak: 0 | sejak: 2026-09-14
+  rentang: 2026-09-14T02:40:35 .. 2026-09-22T11:03:22
+
+[1] SENSUS EVENT (top 25)
+   1,946  feed_invalid
+     572  equity_snapshot
+     144  signal_skipped_stale
+      38  signal_detected
+      37  order_open
+      37  position_readopted
+      37  position_miss_pending
+      37  position_closed
+      33  trail_update
+      20  loop_stall_warning
+       9  engine_start
+       8  engine_stop
+       6  day_rollover
+       6  sl_reanchor
+       5  server_clock_offset
+       2  tp_hit
+       1  be_lock
+       1  order_failed
+       1  signal_skipped_reentry
+
+[2] SESI ENGINE (engine_start)
+  2026-09-14T02:40:35  icas-v3-g4 (MTF H1/PD24j/M15/M5 + trail 50/30, 09 Sep 2026)  balance=9008.63
+  2026-09-14T23:16:04  icas-v3-g4 (MTF H1/PD24j/M15/M5 + trail 50/30, 09 Sep 2026)  balance=9105.69
+  2026-09-14T23:37:57  icas-v3-g4 (MTF H1/PD24j/M15/M5 + trail 50/30, 09 Sep 2026)  balance=9105.69
+  2026-09-15T01:48:32  icas-v3-g4 (MTF H1/PD24j/M15/M5 + trail 50/30, 09 Sep 2026)  balance=9105.69
+  2026-09-15T09:54:11  icas-v3-g4 (MTF H1/PD24j/M15/M5 + trail 50/30, 09 Sep 2026)  balance=9105.69
+  2026-09-15T15:23:09  icas-v3-g4 (MTF H1/PD24j/M15/M5 + trail 50/30, 09 Sep 2026)  balance=9105.69
+  2026-09-15T17:58:10  icas-v3-g4 (MTF H1/PD24j/M15/M5 + trail 50/30, 09 Sep 2026)  balance=9105.69
+  2026-09-16T07:50:43  icas-v3-g4 (MTF H1/PD24j/M15/M5 + trail 50/30, 09 Sep 2026)  balance=9105.69
+  2026-09-21T10:41:17  icas-v3-g4 (MTF H1/PD24j/M15/M5 + trail 50/30, 09 Sep 2026)  balance=8347.62
+
+[3] TRADE — 37 order_open, 37 tiket tertutup
+  selesai: 37  | WR 20/37 = 54.1%  | net $-837.06  | PF 0.54
+  avg win $+49.77  avg loss $-107.80  terbesar +$198.73 / $-178.01
+  streak: menang 7 beruntun / kalah 7 beruntun
+
+  TABEL HARIAN (tanggal close)
+  tanggal        n   W          pnl
+  2026-09-14    10   7       +97.06
+  2026-09-16     5   0      -526.94
+  2026-09-17     9   6       +42.90
+  2026-09-18     5   2      -274.03
+  2026-09-21     2   2       +42.00
+  2026-09-22     6   3      -218.05
+  TOTAL         37  20      -837.06
+
+[4] REKONSILIASI BALANCE
+  balance pertama tercatat : 2026-09-14T02:40:35  $9,008.63
+  balance terakhir         : 2026-09-22T10:58:10  $8,171.57
+  awal + total pnl         : $8,171.57  COCK ✓
+  equity snapshot terakhir : 2026-09-22T10:58:10  $8,171.57
+
+[5] KUALITAS EKSEKUSI
+  event dgn field slippage: 37  (min $-1.46 / max $+10.43)
+    2026-09-14T05:10:04 order_open slippage_usd=-1.40
+    2026-09-14T08:20:01 order_open slippage_usd=-0.46
+    2026-09-14T11:40:01 order_open slippage_usd=+0.17
+    2026-09-14T14:06:19 order_open slippage_usd=-0.71
+    2026-09-14T14:31:47 order_open slippage_usd=-1.46
+    2026-09-14T14:58:22 order_open slippage_usd=+0.42
+    2026-09-14T19:25:03 order_open slippage_usd=+0.28
+    2026-09-14T19:40:00 order_open slippage_usd=+0.99
+  order_failed: 1
+    2026-09-17T19:30:02 
+
+[6] GUARD & PARITAS
+  signal_skipped_stale         144  (bar basi (>120 dtk) dilewati)
+  signal_skipped_reentry         1  (re-entry ditunda (paritas strict_bar_open_entry))
+  mutex_released_stale           0  (mutex dilepas tanpa kepastian broker)
+  server_clock_offset            5  (deteksi offset jam server (TZ-FIX))
+    offset jam server terdeteksi: UTC0
+  max_fav tercatat pada 37/37 trade (median $5.43)
+
+[7] OPERASIONAL
+  equity snapshot: 572 | gap >20 mnt: 27 (kandidat laptop tidur / putus koneksi)
+    2026-09-14T10:26:02 -> 2026-09-14T10:56:43  (31 mnt)
+    2026-09-14T10:56:43 -> 2026-09-14T11:17:51  (21 mnt)
+    2026-09-14T15:50:36 -> 2026-09-14T16:45:04  (54 mnt)
+    2026-09-14T17:45:14 -> 2026-09-14T18:37:04  (52 mnt)
+    2026-09-14T21:37:22 -> 2026-09-14T21:58:08  (21 mnt)
+    2026-09-14T23:31:05 -> 2026-09-14T23:52:59  (22 mnt)
+    2026-09-15T01:38:10 -> 2026-09-15T02:03:34  (25 mnt)
+    2026-09-15T10:09:13 -> 2026-09-15T10:43:10  (34 mnt)
+    2026-09-15T15:13:53 -> 2026-09-15T15:38:11  (24 mnt)
+    2026-09-15T15:38:11 -> 2026-09-15T16:31:14  (53 mnt)
+    2026-09-15T17:46:18 -> 2026-09-15T18:13:11  (27 mnt)
+    2026-09-16T02:28:44 -> 2026-09-16T08:05:43  (337 mnt)
+  hari bursa tercakup (day_rollover): 6
+  event stall/feed-invalid: 1966
+     1,946  feed_invalid
+        20  loop_stall_warning
+
+==============================================================================
+Catatan: bagian '—'/0 = event tidak ada di jurnal (bukan berarti error).
+Evaluasi lengkap vs backtest: lihat prosedur di LAPORAN & sesi evaluasi.
